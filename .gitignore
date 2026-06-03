@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+token-usage-server.log
+codex-token-usage.csv
+codex-token-usage.json
+index.html

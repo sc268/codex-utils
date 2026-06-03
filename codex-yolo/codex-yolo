@@ -1,0 +1,114 @@
+#!/usr/bin/env expect -f
+
+# Run Codex interactively and auto-accept common approval prompts.
+#
+# Defaults:
+#   edits:    "a" = yes, and do not ask again for these files
+#   commands: "p" = yes, and do not ask again for this command prefix
+#
+# Overrides:
+#   CODEX_YOLO_EDIT_REPLY=y
+#   CODEX_YOLO_COMMAND_REPLY=y
+#   CODEX_YOLO_REPLY=y  # legacy shortcut: use y for both
+#   CODEX_YOLO_STATS_REFRESH=/path/to/refresh-codex-token-usage.command
+#   CODEX_YOLO_SKIP_STATS=1
+
+set timeout -1
+
+set edit_reply "a"
+set command_reply "p"
+
+proc fail {message} {
+    puts stderr "codex-yolo: $message"
+    exit 2
+}
+
+if {[info exists env(CODEX_YOLO_REPLY)]} {
+    switch -- $env(CODEX_YOLO_REPLY) {
+        y {
+            set edit_reply "y"
+            set command_reply "y"
+        }
+        a {
+            set edit_reply "a"
+        }
+        p {
+            set command_reply "p"
+        }
+        default {
+            fail "CODEX_YOLO_REPLY must be one of: y, a, p"
+        }
+    }
+}
+
+if {[info exists env(CODEX_YOLO_EDIT_REPLY)]} {
+    set edit_reply $env(CODEX_YOLO_EDIT_REPLY)
+}
+
+if {[info exists env(CODEX_YOLO_COMMAND_REPLY)]} {
+    set command_reply $env(CODEX_YOLO_COMMAND_REPLY)
+}
+
+if {$edit_reply ne "a" && $edit_reply ne "y"} {
+    fail "CODEX_YOLO_EDIT_REPLY must be either 'a' or 'y'"
+}
+
+if {$command_reply ne "p" && $command_reply ne "y"} {
+    fail "CODEX_YOLO_COMMAND_REPLY must be either 'p' or 'y'"
+}
+
+set script_dir [file dirname [file normalize [info script]]]
+set bundled_stats_refresh [file normalize [file join $script_dir .. token-tracker refresh-codex-token-usage.command]]
+set stats_refresh ""
+
+if {[info exists env(CODEX_YOLO_STATS_REFRESH)]} {
+    set stats_refresh $env(CODEX_YOLO_STATS_REFRESH)
+} elseif {[file executable $bundled_stats_refresh]} {
+    set stats_refresh $bundled_stats_refresh
+}
+
+spawn -noecho codex {*}$argv
+
+set edit_prompt {Would you like to make the following edits\?}
+set command_prefix_prompt {Yes, and don't ask again for commands that start}
+
+if {[catch {
+    interact -o \
+        -re $edit_prompt {
+            after 100
+            send -- "$edit_reply\r"
+        } \
+        -re $command_prefix_prompt {
+            after 100
+            send -- "$command_reply\r"
+        } \
+        eof {
+        }
+} interact_error]} {
+    if {![string match "*spawn id*not open*" $interact_error]} {
+        puts stderr "codex-yolo: interact ended: $interact_error"
+    }
+}
+
+set codex_exit 0
+if {[catch {wait} wait_result]} {
+    set codex_exit 1
+} elseif {[llength $wait_result] >= 4} {
+    set os_error [lindex $wait_result 2]
+    set status_value [lindex $wait_result 3]
+    if {$os_error == 0} {
+        set codex_exit $status_value
+    } else {
+        set codex_exit 1
+    }
+}
+
+if {![info exists env(CODEX_YOLO_SKIP_STATS)] && $stats_refresh ne "" && [file executable $stats_refresh]} {
+    if {[catch {exec $stats_refresh} stats_output]} {
+        puts stderr "codex-yolo: token stats refresh failed: $stats_output"
+    } elseif {$stats_output ne ""} {
+        puts stderr $stats_output
+    }
+}
+
+exit $codex_exit
