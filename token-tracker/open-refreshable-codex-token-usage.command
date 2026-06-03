@@ -75,19 +75,33 @@ SERVER_LOG="$OUTPUT_DIR/token-usage-server.log"
 SERVER_PID="$OUTPUT_DIR/token-usage-server.pid"
 OPEN_CMD="${CODEX_TOKEN_USAGE_OPEN_CMD:-open}"
 
-CODEX_TOKEN_USAGE_REPORT_URL="$URL" "$SCRIPT_DIR/refresh-codex-token-usage.command" --output-dir "$OUTPUT_DIR" "${GENERATOR_ARGS[@]}"
+if [[ ${#GENERATOR_ARGS[@]} -gt 0 ]]; then
+  CODEX_TOKEN_USAGE_REPORT_URL="$URL" "$SCRIPT_DIR/refresh-codex-token-usage.command" --output-dir "$OUTPUT_DIR" "${GENERATOR_ARGS[@]}"
+else
+  CODEX_TOKEN_USAGE_REPORT_URL="$URL" "$SCRIPT_DIR/refresh-codex-token-usage.command" --output-dir "$OUTPUT_DIR"
+fi
 
 mkdir -p "$OUTPUT_DIR"
 
 if ! curl -fsS "$URL" >/dev/null 2>&1; then
-  "$PYTHON_BIN" -B "$SCRIPT_DIR/serve-codex-token-usage.py" \
-    --port "$PORT" \
-    --directory "$OUTPUT_DIR" \
-    --generator "$SCRIPT_DIR/codex_token_usage_report.py" \
-    "${GENERATOR_ARGS[@]}" \
-    --daemonize \
-    --log-file "$SERVER_LOG" \
-    --pid-file "$SERVER_PID"
+  if [[ ${#GENERATOR_ARGS[@]} -gt 0 ]]; then
+    "$PYTHON_BIN" -B "$SCRIPT_DIR/serve-codex-token-usage.py" \
+      --port "$PORT" \
+      --directory "$OUTPUT_DIR" \
+      --generator "$SCRIPT_DIR/codex_token_usage_report.py" \
+      "${GENERATOR_ARGS[@]}" \
+      --daemonize \
+      --log-file "$SERVER_LOG" \
+      --pid-file "$SERVER_PID"
+  else
+    "$PYTHON_BIN" -B "$SCRIPT_DIR/serve-codex-token-usage.py" \
+      --port "$PORT" \
+      --directory "$OUTPUT_DIR" \
+      --generator "$SCRIPT_DIR/codex_token_usage_report.py" \
+      --daemonize \
+      --log-file "$SERVER_LOG" \
+      --pid-file "$SERVER_PID"
+  fi
   for _ in {1..30}; do
     if curl -fsS "$URL" >/dev/null 2>&1; then
       break

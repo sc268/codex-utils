@@ -37,7 +37,11 @@ REPORT_JSON="$OUTPUT_DIR/codex-token-usage.json"
 REPORT_HTML="$OUTPUT_DIR/index.html"
 REPORT_URL="${CODEX_TOKEN_USAGE_REPORT_URL:-file://$REPORT_HTML}"
 
-"$PYTHON_BIN" -B "$SCRIPT_DIR/codex_token_usage_report.py" --output-dir "$OUTPUT_DIR" "${GENERATOR_ARGS[@]}" >/dev/null
+if [[ ${#GENERATOR_ARGS[@]} -gt 0 ]]; then
+  "$PYTHON_BIN" -B "$SCRIPT_DIR/codex_token_usage_report.py" --output-dir "$OUTPUT_DIR" "${GENERATOR_ARGS[@]}" >/dev/null
+else
+  "$PYTHON_BIN" -B "$SCRIPT_DIR/codex_token_usage_report.py" --output-dir "$OUTPUT_DIR" >/dev/null
+fi
 
 summary="$("$PYTHON_BIN" - "$REPORT_JSON" <<'PY'
 import json
