@@ -6,7 +6,7 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 OUTPUT_DIR="${CODEX_TOKEN_USAGE_OUTPUT_DIR:-$HOME/Downloads/codex-token-usage}"
 REPORT_JSON="$OUTPUT_DIR/codex-token-usage.json"
 REPORT_HTML="$OUTPUT_DIR/index.html"
-REPORT_URL="file://$REPORT_HTML"
+REPORT_URL="${CODEX_TOKEN_USAGE_REPORT_URL:-file://$REPORT_HTML}"
 
 "$PYTHON_BIN" -B "$SCRIPT_DIR/codex_token_usage_report.py" --output-dir "$OUTPUT_DIR" >/dev/null
 

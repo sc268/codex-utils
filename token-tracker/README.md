@@ -32,6 +32,8 @@ Open the localhost report with an in-page refresh button:
 ./open-refreshable-codex-token-usage.command
 ```
 
+That command also prints the latest aggregate usage stats.
+
 Use a custom output directory:
 
 ```bash
@@ -42,6 +44,12 @@ or:
 
 ```bash
 export CODEX_TOKEN_USAGE_OUTPUT_DIR=/path/to/output
+```
+
+Use a custom browser opener command:
+
+```bash
+export CODEX_TOKEN_USAGE_OPEN_CMD=/path/to/open-command
 ```
 
 The static `file://` HTML cannot run local scripts. Use `open-refreshable-codex-token-usage.command` if you want the `Refresh Logs` button inside the page to update the report.

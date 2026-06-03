@@ -21,6 +21,14 @@ Token tracker integration:
 export CODEX_YOLO_STATS_REFRESH=/path/to/codex-utils/token-tracker/refresh-codex-token-usage.command
 ```
 
+Print usage stats and open the refreshable dashboard:
+
+```bash
+codex-yolo --get-usage
+```
+
+When installed with `./install.sh`, the token tracker support files are installed with the wrapper. If you use a custom tracker path, set `CODEX_YOLO_STATS_REFRESH` or `CODEX_YOLO_STATS_OPEN`.
+
 Disable stats refresh:
 
 ```bash

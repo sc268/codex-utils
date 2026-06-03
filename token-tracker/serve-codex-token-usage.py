@@ -83,7 +83,36 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--directory", default=os.environ.get("CODEX_TOKEN_USAGE_OUTPUT_DIR", str(Path.home() / "Downloads" / "codex-token-usage")))
     parser.add_argument("--generator", default=str(Path(__file__).resolve().parent / "codex_token_usage_report.py"))
+    parser.add_argument("--daemonize", action="store_true", help="Detach into the background before serving.")
+    parser.add_argument("--log-file", default=None, help="Log file to use with --daemonize.")
+    parser.add_argument("--pid-file", default=None, help="Write the background server PID to this file.")
     return parser.parse_args(argv)
+
+
+def daemonize(log_file: str | None) -> int | None:
+    if not hasattr(os, "fork"):
+        raise RuntimeError("--daemonize requires a POSIX-like system")
+
+    pid = os.fork()
+    if pid > 0:
+        return pid
+
+    os.setsid()
+    os.chdir("/")
+
+    stdin_fd = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(stdin_fd, sys.stdin.fileno())
+    os.close(stdin_fd)
+
+    if log_file:
+        Path(log_file).parent.mkdir(parents=True, exist_ok=True)
+        output_fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    else:
+        output_fd = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(output_fd, sys.stdout.fileno())
+    os.dup2(output_fd, sys.stderr.fileno())
+    os.close(output_fd)
+    return None
 
 
 def main(argv: list[str]) -> int:
@@ -91,13 +120,22 @@ def main(argv: list[str]) -> int:
     directory = str(Path(args.directory).expanduser().resolve())
     generator = str(Path(args.generator).expanduser().resolve())
 
+    if args.daemonize:
+        child_pid = daemonize(args.log_file)
+        if child_pid is not None:
+            if args.pid_file:
+                pid_path = Path(args.pid_file).expanduser().resolve()
+                pid_path.parent.mkdir(parents=True, exist_ok=True)
+                pid_path.write_text(f"{child_pid}\n", encoding="utf-8")
+            return 0
+
     def handler(*handler_args: Any, **handler_kwargs: Any) -> TokenUsageHandler:
         return TokenUsageHandler(*handler_args, directory=directory, generator=generator, **handler_kwargs)
 
     server = ThreadingHTTPServer((args.host, args.port), handler)
     url = f"http://{args.host}:{args.port}/index.html"
-    print(f"Serving {directory}")
-    print(f"Open {url}")
+    print(f"Serving {directory}", flush=True)
+    print(f"Open {url}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

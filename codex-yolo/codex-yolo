@@ -11,6 +11,7 @@
 #   CODEX_YOLO_COMMAND_REPLY=y
 #   CODEX_YOLO_REPLY=y  # legacy shortcut: use y for both
 #   CODEX_YOLO_STATS_REFRESH=/path/to/refresh-codex-token-usage.command
+#   CODEX_YOLO_STATS_OPEN=/path/to/open-refreshable-codex-token-usage.command
 #   CODEX_YOLO_SKIP_STATS=1
 
 set timeout -1
@@ -59,12 +60,42 @@ if {$command_reply ne "p" && $command_reply ne "y"} {
 
 set script_dir [file dirname [file normalize [info script]]]
 set bundled_stats_refresh [file normalize [file join $script_dir .. token-tracker refresh-codex-token-usage.command]]
+set bundled_stats_open [file normalize [file join $script_dir .. token-tracker open-refreshable-codex-token-usage.command]]
 set stats_refresh ""
+set stats_open ""
 
 if {[info exists env(CODEX_YOLO_STATS_REFRESH)]} {
     set stats_refresh $env(CODEX_YOLO_STATS_REFRESH)
 } elseif {[file executable $bundled_stats_refresh]} {
     set stats_refresh $bundled_stats_refresh
+}
+
+if {[info exists env(CODEX_YOLO_STATS_OPEN)]} {
+    set stats_open $env(CODEX_YOLO_STATS_OPEN)
+} elseif {[file executable $bundled_stats_open]} {
+    set stats_open $bundled_stats_open
+} elseif {$stats_refresh ne ""} {
+    set inferred_stats_open [file join [file dirname $stats_refresh] open-refreshable-codex-token-usage.command]
+    if {[file executable $inferred_stats_open]} {
+        set stats_open $inferred_stats_open
+    }
+}
+
+if {[llength $argv] > 0 && [lindex $argv 0] eq "--get-usage"} {
+    if {[llength $argv] != 1} {
+        fail "--get-usage cannot be combined with Codex CLI arguments"
+    }
+    if {$stats_open eq "" || ![file executable $stats_open]} {
+        fail "token usage opener not found; set CODEX_YOLO_STATS_OPEN or CODEX_YOLO_STATS_REFRESH"
+    }
+    if {[catch {exec $stats_open 2>@1} usage_output]} {
+        puts stderr "codex-yolo: token usage refresh failed: $usage_output"
+        exit 1
+    }
+    if {$usage_output ne ""} {
+        puts $usage_output
+    }
+    exit 0
 }
 
 spawn -noecho codex {*}$argv
@@ -104,7 +135,7 @@ if {[catch {wait} wait_result]} {
 }
 
 if {![info exists env(CODEX_YOLO_SKIP_STATS)] && $stats_refresh ne "" && [file executable $stats_refresh]} {
-    if {[catch {exec $stats_refresh} stats_output]} {
+    if {[catch {exec $stats_refresh 2>@1} stats_output]} {
         puts stderr "codex-yolo: token stats refresh failed: $stats_output"
     } elseif {$stats_output ne ""} {
         puts stderr $stats_output

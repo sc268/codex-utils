@@ -47,16 +47,24 @@ Run Codex through the approval helper from the repo checkout:
 ./codex-yolo/codex-yolo
 ```
 
+Print usage stats and open the refreshable token dashboard:
+
+```bash
+./codex-yolo/codex-yolo --get-usage
+```
+
 Install `codex-yolo` into `/usr/local/bin`:
 
 ```bash
 ./codex-yolo/install.sh
 ```
 
-If `codex-yolo` cannot find the sibling token tracker after installation, set:
+The installer also copies the token tracker support files into:
 
 ```bash
-export CODEX_YOLO_STATS_REFRESH=/path/to/codex-utils/token-tracker/refresh-codex-token-usage.command
+/usr/local/share/codex-utils
 ```
+
+Override `PREFIX=/some/path` to install somewhere else. `codex-yolo --get-usage` uses the installed open script automatically. Set `CODEX_YOLO_STATS_OPEN` only if the open script lives somewhere else.
 
 Set `CODEX_YOLO_SKIP_STATS=1` to skip token report refresh after a `codex-yolo` run.

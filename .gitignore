@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .DS_Store
 token-usage-server.log
+token-usage-server.pid
 codex-token-usage.csv
 codex-token-usage.json
 index.html
