@@ -38,6 +38,17 @@ That command also prints the latest aggregate usage stats.
 
 Shared cloud folders are supported. Run the refresh command on each computer with the same `--output-dir`; each computer updates its own `machines/<machine-id>.json` snapshot, and the top-level report aggregates all snapshots.
 
+Dashboard views include:
+
+- active-day average usage
+- total and per-computer usage
+- token usage by project folder
+- daily totals and daily input/output breakdowns
+- largest sessions
+- sortable session rows
+- computer, project, model, minimum-token, and text filters
+- filtered JSON export from the browser
+
 Use a custom output directory:
 
 ```bash

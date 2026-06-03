@@ -68,6 +68,8 @@ Use a specific report folder without setting an environment variable:
 
 For a shared cloud folder, run the same command on each computer. Each computer writes `machines/<machine-id>.json`; `index.html` aggregates all machine snapshots and shows both per-computer and total usage.
 
+The dashboard includes active-day average usage, per-computer totals, token usage by project folder, daily charts, sortable session rows, computer/project/model/min-token filters, search, and filtered JSON export.
+
 Customize the computer label:
 
 ```bash

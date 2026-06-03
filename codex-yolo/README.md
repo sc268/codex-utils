@@ -42,6 +42,8 @@ codex-yolo --update-cache-dir /path/to/output
 
 When multiple computers use the same cloud output folder, each one writes a snapshot under `machines/`. The generated `index.html` totals every snapshot and includes a per-computer breakdown.
 
+The dashboard also includes active-day averages, project-folder usage, daily charts, filters, sortable rows, and filtered JSON export.
+
 Customize the computer label:
 
 ```bash

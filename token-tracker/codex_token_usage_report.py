@@ -132,6 +132,14 @@ def default_machine_name() -> str:
     return socket.gethostname() or "machine"
 
 
+def project_name_from_path(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text or text == "unknown":
+        return "unknown"
+    name = Path(text).name
+    return name or text
+
+
 def content_text(content: Any) -> str:
     if isinstance(content, str):
         return content
@@ -330,6 +338,7 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
     by_day: dict[str, dict[str, int]] = defaultdict(empty_usage)
     by_model: dict[str, dict[str, int]] = defaultdict(empty_usage)
     by_cwd: dict[str, dict[str, int]] = defaultdict(empty_usage)
+    by_project: dict[str, dict[str, Any]] = {}
     by_machine: dict[str, dict[str, Any]] = {}
 
     for record in records:
@@ -358,6 +367,17 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
         cwd = str(record.get("cwd") or "unknown")
         add_usage(by_model[model], usage)
         add_usage(by_cwd[cwd], usage)
+        if cwd not in by_project:
+            by_project[cwd] = {
+                "name": project_name_from_path(cwd),
+                "path": cwd,
+                "session_count": 0,
+                "tracked_session_count": 0,
+                **empty_usage(),
+            }
+        by_project[cwd]["session_count"] += 1
+        by_project[cwd]["tracked_session_count"] += 1
+        add_usage(by_project[cwd], usage)
         machine_id = str(record.get("machine_id") or "unknown")
         if machine_id in by_machine:
             add_usage(by_machine[machine_id], usage)
@@ -375,21 +395,38 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
     top_sessions = sorted(tracked, key=lambda item: int(item.get("total_tokens", 0) or 0), reverse=True)[:20]
 
     daily = [{"name": name, **usage} for name, usage in sorted(by_day.items(), key=lambda item: item[0])]
+    active_daily = [day for day in daily if int(day.get("total_tokens", 0) or 0) > 0]
+    active_day_count = len(active_daily)
+    avg_daily = empty_usage()
+    if active_day_count:
+        for key in USAGE_KEYS:
+            avg_daily[key] = round(sum(int(day.get(key, 0) or 0) for day in active_daily) / active_day_count)
     machines = sorted(
         by_machine.values(),
         key=lambda item: (int(item.get("total_tokens", 0) or 0), str(item.get("name") or "")),
         reverse=True,
     )
+    projects = sorted(
+        by_project.values(),
+        key=lambda item: (int(item.get("total_tokens", 0) or 0), str(item.get("path") or "")),
+        reverse=True,
+    )
+    for project in projects:
+        sessions = int(project.get("tracked_session_count", 0) or 0)
+        project["avg_tokens_per_session"] = round(int(project.get("total_tokens", 0) or 0) / sessions) if sessions else 0
 
     return {
         "session_count": len(records),
         "tracked_session_count": len(tracked),
         "untracked_session_count": len(records) - len(tracked),
         "machine_count": len(machines),
+        "active_day_count": active_day_count,
+        "avg_daily": avg_daily,
         "totals": totals,
         "daily": daily,
         "machines": machines,
         "models": sorted_usage(by_model),
+        "projects": projects,
         "workdirs": sorted_usage(by_cwd)[:25],
         "top_sessions": top_sessions,
     }
@@ -613,6 +650,52 @@ def html_report(report: dict[str, Any]) -> str:
       font: inherit;
       background: #ffffff;
     }
+    input[type="number"], select {
+      width: 100%;
+      padding: 9px 11px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font: inherit;
+      background: #ffffff;
+    }
+    button.secondary {
+      background: #ffffff;
+      color: #111827;
+    }
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(150px, 1fr));
+      gap: 12px;
+      align-items: end;
+    }
+    .filter-field {
+      display: grid;
+      gap: 6px;
+    }
+    .filter-field label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    .filter-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .project-grid {
+      display: grid;
+      grid-template-columns: minmax(0, .9fr) minmax(420px, 1.1fr);
+      gap: 18px;
+      align-items: start;
+    }
+    .computer-grid {
+      display: grid;
+      grid-template-columns: minmax(0, .8fr) minmax(420px, 1.2fr);
+      gap: 18px;
+      align-items: start;
+    }
     .links {
       display: flex;
       gap: 10px;
@@ -640,6 +723,9 @@ def html_report(report: dict[str, Any]) -> str:
       min-width: 460px;
     }
     .machine-table {
+      min-width: 760px;
+    }
+    .project-table {
       min-width: 760px;
     }
     .daily-table th {
@@ -701,6 +787,9 @@ def html_report(report: dict[str, Any]) -> str:
       .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .charts { grid-template-columns: 1fr; }
       .daily-total-grid { grid-template-columns: 1fr; }
+      .filters { grid-template-columns: 1fr; }
+      .project-grid { grid-template-columns: 1fr; }
+      .computer-grid { grid-template-columns: 1fr; }
       .controls { align-items: stretch; flex-direction: column; }
       .links { justify-content: flex-start; }
     }
@@ -724,23 +813,81 @@ def html_report(report: dict[str, Any]) -> str:
 
     <section class="panel">
       <div class="section-head">
+        <h2>Data Explorer</h2>
+        <div class="legend" id="filterSummary"></div>
+      </div>
+      <div class="filters">
+        <div class="filter-field">
+          <label for="machineFilter">Computer</label>
+          <select id="machineFilter"></select>
+        </div>
+        <div class="filter-field">
+          <label for="projectFilter">Project Folder</label>
+          <select id="projectFilter"></select>
+        </div>
+        <div class="filter-field">
+          <label for="modelFilter">Model</label>
+          <select id="modelFilter"></select>
+        </div>
+        <div class="filter-field">
+          <label for="minTokensFilter">Min Tokens</label>
+          <input id="minTokensFilter" type="number" min="0" step="1000" placeholder="0">
+        </div>
+        <div class="filter-actions">
+          <button id="resetFilters" class="secondary" type="button">Reset</button>
+          <button id="exportFiltered" class="secondary" type="button">Export JSON</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
         <h2>Computer Breakdown</h2>
       </div>
-      <div class="table-wrap">
-        <table class="machine-table">
-          <thead>
-            <tr>
-              <th>Computer</th>
-              <th>Total</th>
-              <th>Input</th>
-              <th>Cached</th>
-              <th>Output</th>
-              <th>Reasoning</th>
-              <th>Sessions</th>
-            </tr>
-          </thead>
-          <tbody id="machineBody"></tbody>
-        </table>
+      <div class="computer-grid">
+        <div class="chart-box" id="machineChart"></div>
+        <div class="table-wrap">
+          <table class="machine-table">
+            <thead>
+              <tr>
+                <th>Computer</th>
+                <th>Total</th>
+                <th>Input</th>
+                <th>Cached</th>
+                <th>Output</th>
+                <th>Reasoning</th>
+                <th>Sessions</th>
+              </tr>
+            </thead>
+            <tbody id="machineBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <h2>Project Folder Usage</h2>
+        <div class="legend">
+          <span><i class="swatch" style="background: var(--input)"></i>Input</span>
+          <span><i class="swatch" style="background: var(--output)"></i>Output</span>
+        </div>
+      </div>
+      <div class="project-grid">
+        <div class="chart-box" id="projectChart"></div>
+        <div class="table-wrap">
+          <table class="project-table">
+            <thead>
+              <tr>
+                <th>Project</th>
+                <th>Total</th>
+                <th>Avg / Session</th>
+                <th>Sessions</th>
+              </tr>
+            </thead>
+            <tbody id="projectBody"></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
@@ -790,7 +937,7 @@ def html_report(report: dict[str, Any]) -> str:
 
     <section class="panel">
       <div class="controls">
-        <input id="search" type="search" placeholder="Filter by model, folder, session id, or first message">
+        <input id="search" type="search" placeholder="Filter table by machine, model, folder, session id, or first message">
         <div class="links">
           <a href="codex-token-usage.csv">CSV</a>
           <a href="codex-token-usage.json">JSON</a>
@@ -826,6 +973,8 @@ def html_report(report: dict[str, Any]) -> str:
     const summary = report.summary || {};
     let sortKey = "started_at";
     let sortDir = -1;
+    let dashboardRows = records.slice();
+    let dashboardSummary = summary;
 
     const fmt = new Intl.NumberFormat();
     const colors = {
@@ -853,6 +1002,120 @@ def html_report(report: dict[str, Any]) -> str:
 
     function metric(label, value, sub) {
       return `<div class="metric"><div class="label">${label}</div><div class="value">${value}</div><div class="sub">${sub || ""}</div></div>`;
+    }
+
+    function projectName(path) {
+      const text = String(path || "unknown");
+      const pieces = text.split("/").filter(Boolean);
+      return pieces[pieces.length - 1] || text;
+    }
+
+    function usageFrom(row) {
+      return {
+        input_tokens: Number(row.input_tokens || 0),
+        cached_input_tokens: Number(row.cached_input_tokens || 0),
+        output_tokens: Number(row.output_tokens || 0),
+        reasoning_output_tokens: Number(row.reasoning_output_tokens || 0),
+        total_tokens: Number(row.total_tokens || 0)
+      };
+    }
+
+    function addUsage(target, usage) {
+      Object.keys(usage).forEach(key => {
+        target[key] = Number(target[key] || 0) + Number(usage[key] || 0);
+      });
+    }
+
+    function emptyUsage() {
+      return {
+        input_tokens: 0,
+        cached_input_tokens: 0,
+        output_tokens: 0,
+        reasoning_output_tokens: 0,
+        total_tokens: 0
+      };
+    }
+
+    function sortUsageRows(rows) {
+      return rows.sort((a, b) => Number(b.total_tokens || 0) - Number(a.total_tokens || 0) || String(a.name || a.path || "").localeCompare(String(b.name || b.path || "")));
+    }
+
+    function aggregateRows(rows) {
+      const tracked = rows.filter(row => row.has_usage);
+      const totals = emptyUsage();
+      const byDay = new Map();
+      const byMachine = new Map();
+      const byProject = new Map();
+      const byModel = new Map();
+
+      rows.forEach(row => {
+        const machineId = row.machine_id || "unknown";
+        const machineName = row.machine_name || machineId;
+        if (!byMachine.has(machineId)) {
+          byMachine.set(machineId, { machine_id: machineId, name: machineName, session_count: 0, tracked_session_count: 0, untracked_session_count: 0, ...emptyUsage() });
+        }
+        const machine = byMachine.get(machineId);
+        machine.session_count += 1;
+        if (row.has_usage) {
+          machine.tracked_session_count += 1;
+        } else {
+          machine.untracked_session_count += 1;
+        }
+      });
+
+      tracked.forEach(row => {
+        const usage = usageFrom(row);
+        addUsage(totals, usage);
+
+        const date = row.date || "unknown";
+        if (!byDay.has(date)) byDay.set(date, { name: date, ...emptyUsage() });
+        addUsage(byDay.get(date), usage);
+
+        const machineId = row.machine_id || "unknown";
+        if (byMachine.has(machineId)) addUsage(byMachine.get(machineId), usage);
+
+        const path = row.cwd || "unknown";
+        if (!byProject.has(path)) {
+          byProject.set(path, { name: projectName(path), path, session_count: 0, tracked_session_count: 0, ...emptyUsage() });
+        }
+        const project = byProject.get(path);
+        project.session_count += 1;
+        project.tracked_session_count += 1;
+        addUsage(project, usage);
+
+        const model = row.model || "unknown";
+        if (!byModel.has(model)) byModel.set(model, { name: model, ...emptyUsage() });
+        addUsage(byModel.get(model), usage);
+      });
+
+      const daily = Array.from(byDay.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      const activeDaily = daily.filter(day => Number(day.total_tokens || 0) > 0);
+      const avgDaily = emptyUsage();
+      if (activeDaily.length) {
+        Object.keys(avgDaily).forEach(key => {
+          avgDaily[key] = Math.round(activeDaily.reduce((sum, day) => sum + Number(day[key] || 0), 0) / activeDaily.length);
+        });
+      }
+
+      const projects = sortUsageRows(Array.from(byProject.values())).map(project => ({
+        ...project,
+        avg_tokens_per_session: project.tracked_session_count ? Math.round(Number(project.total_tokens || 0) / project.tracked_session_count) : 0
+      }));
+
+      return {
+        session_count: rows.length,
+        tracked_session_count: tracked.length,
+        untracked_session_count: rows.length - tracked.length,
+        machine_count: byMachine.size,
+        active_day_count: activeDaily.length,
+        avg_daily: avgDaily,
+        totals,
+        daily,
+        machines: sortUsageRows(Array.from(byMachine.values())),
+        projects,
+        models: sortUsageRows(Array.from(byModel.values())),
+        top_sessions: tracked.slice().sort((a, b) => Number(b.total_tokens || 0) - Number(a.total_tokens || 0)).slice(0, 20)
+      };
     }
 
     function renderMeta() {
@@ -894,22 +1157,128 @@ def html_report(report: dict[str, Any]) -> str:
       });
     }
 
-    function renderMetrics() {
-      const totals = summary.totals || {};
-      const tracked = summary.tracked_session_count || 0;
-      const all = summary.session_count || 0;
-      document.getElementById("metrics").innerHTML = [
-        metric("Total Tokens", number(totals.total_tokens), `${number(tracked)} tracked sessions`),
-        metric("Input", number(totals.input_tokens), `${number(totals.cached_input_tokens)} cached`),
-        metric("Output", number(totals.output_tokens), "Visible plus reasoning output"),
-        metric("Reasoning", number(totals.reasoning_output_tokens), "Subset of output tokens"),
-        metric("Sessions", number(all), `${number(summary.untracked_session_count || 0)} without token_count`),
-        metric("Computers", number(summary.machine_count || 0), `${number((summary.models || []).length)} models`)
+    function selected(id) {
+      const element = document.getElementById(id);
+      return element ? element.value : "";
+    }
+
+    function option(value, label) {
+      return `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
+    }
+
+    function uniqueOptions(rows, getter) {
+      return Array.from(new Set(rows.map(getter).filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b)));
+    }
+
+    function populateFilters() {
+      const machine = document.getElementById("machineFilter");
+      const project = document.getElementById("projectFilter");
+      const model = document.getElementById("modelFilter");
+      machine.innerHTML = option("", "All computers") + uniqueOptions(records, row => row.machine_name || row.machine_id || "unknown").map(value => option(value, value)).join("");
+      project.innerHTML = option("", "All folders") + uniqueOptions(records, row => row.cwd || "unknown").map(value => option(value, value)).join("");
+      model.innerHTML = option("", "All models") + uniqueOptions(records, row => row.model || "unknown").map(value => option(value, value)).join("");
+    }
+
+    function explorerRows() {
+      const machine = selected("machineFilter");
+      const project = selected("projectFilter");
+      const model = selected("modelFilter");
+      const minTokens = Number(selected("minTokensFilter") || 0);
+      return records.filter(row => {
+        if (machine && (row.machine_name || row.machine_id || "unknown") !== machine) return false;
+        if (project && (row.cwd || "unknown") !== project) return false;
+        if (model && (row.model || "unknown") !== model) return false;
+        if (minTokens && Number(row.total_tokens || 0) < minTokens) return false;
+        return true;
+      });
+    }
+
+    function renderFilterSummary(rows, current) {
+      document.getElementById("filterSummary").innerHTML = [
+        `<span>${number(rows.length)} sessions</span>`,
+        `<span>${number(current.tracked_session_count || 0)} tracked</span>`,
+        `<span>${number(current.active_day_count || 0)} active days</span>`
       ].join("");
     }
 
+    function wireFilters() {
+      ["machineFilter", "projectFilter", "modelFilter", "minTokensFilter"].forEach(id => {
+        document.getElementById(id).addEventListener("input", renderDashboard);
+      });
+      document.getElementById("resetFilters").addEventListener("click", () => {
+        ["machineFilter", "projectFilter", "modelFilter", "minTokensFilter", "search"].forEach(id => {
+          const element = document.getElementById(id);
+          if (element) element.value = "";
+        });
+        renderDashboard();
+      });
+      document.getElementById("exportFiltered").addEventListener("click", () => {
+        const payload = {
+          metadata: {
+            generated_at: new Date().toISOString(),
+            source_report_generated_at: report.metadata.generated_at || "",
+            filtered_session_count: dashboardRows.length
+          },
+          summary: dashboardSummary,
+          records: filteredRows()
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "codex-token-usage-filtered.json";
+        link.click();
+        URL.revokeObjectURL(url);
+      });
+    }
+
+    function renderMetrics() {
+      const totals = dashboardSummary.totals || {};
+      const avgDaily = dashboardSummary.avg_daily || {};
+      const tracked = dashboardSummary.tracked_session_count || 0;
+      const all = dashboardSummary.session_count || 0;
+      document.getElementById("metrics").innerHTML = [
+        metric("Total Tokens", number(totals.total_tokens), `${number(tracked)} tracked sessions`),
+        metric("Avg Active Day", number(avgDaily.total_tokens), `${number(dashboardSummary.active_day_count || 0)} non-zero days`),
+        metric("Input", number(totals.input_tokens), `${number(totals.cached_input_tokens)} cached`),
+        metric("Output", number(totals.output_tokens), "Visible plus reasoning output"),
+        metric("Reasoning", number(totals.reasoning_output_tokens), "Subset of output tokens"),
+        metric("Computers", number(dashboardSummary.machine_count || 0), `${number((dashboardSummary.projects || []).length)} project folders`)
+      ].join("");
+    }
+
+    function renderMachineChart() {
+      const data = dashboardSummary.machines || [];
+      const target = document.getElementById("machineChart");
+      if (!data.length) {
+        target.innerHTML = '<div class="empty-state">No computer usage found.</div>';
+        return;
+      }
+      const width = 620;
+      const rowH = 34;
+      const height = data.length * rowH + 18;
+      const labelW = 150;
+      const barW = width - labelW - 92;
+      const maxTotal = Math.max(...data.map(item => Number(item.total_tokens || 0)), 1);
+      const rows = data.map((item, i) => {
+        const y = 10 + i * rowH;
+        const w = barW * Number(item.total_tokens || 0) / maxTotal;
+        const label = item.name || item.machine_id || "unknown";
+        return `
+          <g>
+            <title>${escapeHtml(label)}: ${number(item.total_tokens)} tokens</title>
+            <text x="0" y="${y + 15}" font-size="12" fill="${colors.muted}">${escapeHtml(String(label).slice(0, 22))}</text>
+            <rect x="${labelW}" y="${y}" width="${barW}" height="18" fill="#eef2f7" rx="4"></rect>
+            ${stackedBar(labelW, y, w, 18, Number(item.input_tokens || 0), Number(item.output_tokens || 0), Math.max(Number(item.input_tokens || 0) + Number(item.output_tokens || 0), 1))}
+            <text x="${labelW + barW + 8}" y="${y + 14}" font-size="12" fill="${colors.muted}">${number(item.total_tokens)}</text>
+          </g>
+        `;
+      }).join("");
+      target.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Per-computer token usage chart">${rows}</svg>`;
+    }
+
     function renderMachineTable() {
-      const data = summary.machines || [];
+      const data = dashboardSummary.machines || [];
       const body = document.getElementById("machineBody");
       if (!data.length) {
         body.innerHTML = '<tr><td colspan="7">No computer usage found.</td></tr>';
@@ -928,12 +1297,59 @@ def html_report(report: dict[str, Any]) -> str:
       `).join("");
     }
 
+    function renderProjectChart() {
+      const data = (dashboardSummary.projects || []).slice(0, 12);
+      const target = document.getElementById("projectChart");
+      if (!data.length) {
+        target.innerHTML = '<div class="empty-state">No project folder usage found.</div>';
+        return;
+      }
+      const width = 760;
+      const rowH = 36;
+      const height = data.length * rowH + 18;
+      const labelW = 230;
+      const barW = width - labelW - 110;
+      const maxTotal = Math.max(...data.map(item => Number(item.total_tokens || 0)), 1);
+      const rows = data.map((item, i) => {
+        const y = 10 + i * rowH;
+        const w = barW * Number(item.total_tokens || 0) / maxTotal;
+        const label = item.name || item.path || "unknown";
+        return `
+          <g>
+            <title>${escapeHtml(item.path || label)}: ${number(item.total_tokens)} tokens</title>
+            <text x="0" y="${y + 15}" font-size="12" fill="${colors.muted}">${escapeHtml(String(label).slice(0, 30))}</text>
+            <rect x="${labelW}" y="${y}" width="${barW}" height="18" fill="#eef2f7" rx="4"></rect>
+            ${stackedBar(labelW, y, w, 18, Number(item.input_tokens || 0), Number(item.output_tokens || 0), Math.max(Number(item.input_tokens || 0) + Number(item.output_tokens || 0), 1))}
+            <text x="${labelW + barW + 8}" y="${y + 14}" font-size="12" fill="${colors.muted}">${number(item.total_tokens)}</text>
+          </g>
+        `;
+      }).join("");
+      target.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Project folder token usage chart">${rows}</svg>`;
+    }
+
+    function renderProjectTable() {
+      const data = (dashboardSummary.projects || []).slice(0, 30);
+      const body = document.getElementById("projectBody");
+      if (!data.length) {
+        body.innerHTML = '<tr><td colspan="4">No project folder usage found.</td></tr>';
+        return;
+      }
+      body.innerHTML = data.map(project => `
+        <tr>
+          <td class="path" title="${escapeHtml(project.path || "")}">${escapeHtml(project.name || project.path || "unknown")}</td>
+          <td class="num">${number(project.total_tokens)}</td>
+          <td class="num">${number(project.avg_tokens_per_session)}</td>
+          <td class="num">${number(project.tracked_session_count || 0)}</td>
+        </tr>
+      `).join("");
+    }
+
     function sessionsForDate(date) {
-      return records.filter(row => row.has_usage && row.date === date).length;
+      return dashboardRows.filter(row => row.has_usage && row.date === date).length;
     }
 
     function renderDailyTotalChart() {
-      const data = summary.daily || [];
+      const data = dashboardSummary.daily || [];
       const target = document.getElementById("dailyTotalChart");
       if (!data.length) {
         target.innerHTML = '<div class="empty-state">No token usage records found.</div>';
@@ -984,7 +1400,7 @@ def html_report(report: dict[str, Any]) -> str:
     }
 
     function renderDailyTotalsTable() {
-      const data = (summary.daily || []).slice().sort((a, b) => String(b.name).localeCompare(String(a.name)));
+      const data = (dashboardSummary.daily || []).slice().sort((a, b) => String(b.name).localeCompare(String(a.name)));
       const body = document.getElementById("dailyTotalsBody");
       if (!data.length) {
         body.innerHTML = '<tr><td colspan="3">No daily token usage found.</td></tr>';
@@ -1009,7 +1425,7 @@ def html_report(report: dict[str, Any]) -> str:
     }
 
     function renderDailyChart() {
-      const data = summary.daily || [];
+      const data = dashboardSummary.daily || [];
       const target = document.getElementById("dailyChart");
       if (!data.length) {
         target.innerHTML = '<div class="empty-state">No token usage records found.</div>';
@@ -1065,7 +1481,7 @@ def html_report(report: dict[str, Any]) -> str:
     }
 
     function renderTopChart() {
-      const data = (summary.top_sessions || []).slice(0, 12);
+      const data = (dashboardSummary.top_sessions || []).slice(0, 12);
       const target = document.getElementById("topChart");
       if (!data.length) {
         target.innerHTML = '<div class="empty-state">No tracked sessions yet.</div>';
@@ -1096,7 +1512,7 @@ def html_report(report: dict[str, Any]) -> str:
 
     function filteredRows() {
       const q = document.getElementById("search").value.trim().toLowerCase();
-      let rows = records.slice();
+      let rows = dashboardRows.slice();
       if (q) {
         rows = rows.filter(row => [
           row.session_id,
@@ -1157,16 +1573,28 @@ def html_report(report: dict[str, Any]) -> str:
       document.getElementById("search").addEventListener("input", renderTable);
     }
 
+    function renderDashboard() {
+      dashboardRows = explorerRows();
+      dashboardSummary = aggregateRows(dashboardRows);
+      renderFilterSummary(dashboardRows, dashboardSummary);
+      renderMetrics();
+      renderMachineChart();
+      renderMachineTable();
+      renderProjectChart();
+      renderProjectTable();
+      renderDailyTotalChart();
+      renderDailyTotalsTable();
+      renderDailyChart();
+      renderTopChart();
+      renderTable();
+    }
+
     renderMeta();
     wireRefreshButton();
-    renderMetrics();
-    renderMachineTable();
-    renderDailyTotalChart();
-    renderDailyTotalsTable();
-    renderDailyChart();
-    renderTopChart();
+    populateFilters();
+    wireFilters();
     wireTableSort();
-    renderTable();
+    renderDashboard();
   </script>
 </body>
 </html>
