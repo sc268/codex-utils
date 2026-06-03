@@ -30,6 +30,7 @@ Open the localhost report with an in-page refresh button:
 
 ```bash
 ./open-refreshable-codex-token-usage.command
+./open-refreshable-codex-token-usage.command --output-dir /path/to/output
 ```
 
 That command also prints the latest aggregate usage stats.

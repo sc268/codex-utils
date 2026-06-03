@@ -4,6 +4,24 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 OUTPUT_DIR="${CODEX_TOKEN_USAGE_OUTPUT_DIR:-$HOME/Downloads/codex-token-usage}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output-dir|--cache-dir)
+      if [[ $# -lt 2 ]]; then
+        echo "$1 requires a directory" >&2
+        exit 2
+      fi
+      OUTPUT_DIR="$2"
+      shift 2
+      ;;
+    *)
+      echo "unknown option: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
 REPORT_JSON="$OUTPUT_DIR/codex-token-usage.json"
 REPORT_HTML="$OUTPUT_DIR/index.html"
 REPORT_URL="${CODEX_TOKEN_USAGE_REPORT_URL:-file://$REPORT_HTML}"

@@ -27,6 +27,13 @@ Print usage stats and open the refreshable dashboard:
 codex-yolo --get-usage
 ```
 
+Use a specific report folder without setting `CODEX_TOKEN_USAGE_OUTPUT_DIR`:
+
+```bash
+codex-yolo --get-usage --output-dir /path/to/output
+codex-yolo --update-cache-dir /path/to/output
+```
+
 When installed with `./install.sh`, the token tracker support files are installed with the wrapper. If you use a custom tracker path, set `CODEX_YOLO_STATS_REFRESH` or `CODEX_YOLO_STATS_OPEN`.
 
 Disable stats refresh:

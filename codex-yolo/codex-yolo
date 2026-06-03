@@ -24,6 +24,58 @@ proc fail {message} {
     exit 2
 }
 
+proc run_usage {stats_open output_dir} {
+    if {$stats_open eq "" || ![file executable $stats_open]} {
+        fail "token usage opener not found; set CODEX_YOLO_STATS_OPEN or CODEX_YOLO_STATS_REFRESH"
+    }
+
+    set usage_command [list $stats_open]
+    if {$output_dir ne ""} {
+        lappend usage_command "--output-dir" $output_dir
+    }
+
+    if {[catch {exec {*}$usage_command 2>@1} usage_output]} {
+        puts stderr "codex-yolo: token usage refresh failed: $usage_output"
+        exit 1
+    }
+    if {$usage_output ne ""} {
+        puts $usage_output
+    }
+    exit 0
+}
+
+proc usage_output_dir_from_args {command args_list} {
+    set output_dir ""
+    set remaining $args_list
+
+    if {$command eq "--update-cache-dir" && [llength $remaining] > 0} {
+        set first [lindex $remaining 0]
+        if {![string match "--*" $first]} {
+            set output_dir [file normalize $first]
+            set remaining [lrange $remaining 1 end]
+        }
+    }
+
+    while {[llength $remaining] > 0} {
+        set option [lindex $remaining 0]
+        switch -- $option {
+            --output-dir -
+            --cache-dir {
+                if {[llength $remaining] < 2} {
+                    fail "$option requires a directory"
+                }
+                set output_dir [file normalize [lindex $remaining 1]]
+                set remaining [lrange $remaining 2 end]
+            }
+            default {
+                fail "$command cannot be combined with Codex CLI arguments"
+            }
+        }
+    }
+
+    return $output_dir
+}
+
 if {[info exists env(CODEX_YOLO_REPLY)]} {
     switch -- $env(CODEX_YOLO_REPLY) {
         y {
@@ -81,21 +133,12 @@ if {[info exists env(CODEX_YOLO_STATS_OPEN)]} {
     }
 }
 
-if {[llength $argv] > 0 && [lindex $argv 0] eq "--get-usage"} {
-    if {[llength $argv] != 1} {
-        fail "--get-usage cannot be combined with Codex CLI arguments"
+if {[llength $argv] > 0} {
+    set command [lindex $argv 0]
+    if {$command eq "--get-usage" || $command eq "--update-cache-dir"} {
+        set output_dir [usage_output_dir_from_args $command [lrange $argv 1 end]]
+        run_usage $stats_open $output_dir
     }
-    if {$stats_open eq "" || ![file executable $stats_open]} {
-        fail "token usage opener not found; set CODEX_YOLO_STATS_OPEN or CODEX_YOLO_STATS_REFRESH"
-    }
-    if {[catch {exec $stats_open 2>@1} usage_output]} {
-        puts stderr "codex-yolo: token usage refresh failed: $usage_output"
-        exit 1
-    }
-    if {$usage_output ne ""} {
-        puts $usage_output
-    }
-    exit 0
 }
 
 spawn -noecho codex {*}$argv

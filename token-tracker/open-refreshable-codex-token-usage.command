@@ -5,12 +5,38 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 OUTPUT_DIR="${CODEX_TOKEN_USAGE_OUTPUT_DIR:-$HOME/Downloads/codex-token-usage}"
 PORT="${CODEX_TOKEN_USAGE_PORT:-8765}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output-dir|--cache-dir)
+      if [[ $# -lt 2 ]]; then
+        echo "$1 requires a directory" >&2
+        exit 2
+      fi
+      OUTPUT_DIR="$2"
+      shift 2
+      ;;
+    --port)
+      if [[ $# -lt 2 ]]; then
+        echo "$1 requires a port" >&2
+        exit 2
+      fi
+      PORT="$2"
+      shift 2
+      ;;
+    *)
+      echo "unknown option: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
 URL="http://127.0.0.1:${PORT}/index.html"
 SERVER_LOG="$OUTPUT_DIR/token-usage-server.log"
 SERVER_PID="$OUTPUT_DIR/token-usage-server.pid"
 OPEN_CMD="${CODEX_TOKEN_USAGE_OPEN_CMD:-open}"
 
-CODEX_TOKEN_USAGE_REPORT_URL="$URL" "$SCRIPT_DIR/refresh-codex-token-usage.command"
+CODEX_TOKEN_USAGE_REPORT_URL="$URL" "$SCRIPT_DIR/refresh-codex-token-usage.command" --output-dir "$OUTPUT_DIR"
 
 mkdir -p "$OUTPUT_DIR"
 

@@ -53,6 +53,13 @@ Print usage stats and open the refreshable token dashboard:
 ./codex-yolo/codex-yolo --get-usage
 ```
 
+Use a specific report folder without setting an environment variable:
+
+```bash
+./codex-yolo/codex-yolo --get-usage --output-dir /path/to/output
+./codex-yolo/codex-yolo --update-cache-dir /path/to/output
+```
+
 Install `codex-yolo` into `/usr/local/bin`:
 
 ```bash
