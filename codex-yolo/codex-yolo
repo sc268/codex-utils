@@ -1,4 +1,10 @@
-#!/usr/bin/env expect -f
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export CODEX_YOLO_SCRIPT_DIR="$SCRIPT_DIR"
+
+exec expect -f - -- "$@" <<'EXPECT'
 
 # Run Codex interactively and auto-accept common approval prompts.
 #
@@ -24,14 +30,62 @@ proc fail {message} {
     exit 2
 }
 
-proc run_usage {stats_open output_dir} {
+proc print_help {} {
+    puts {Usage:
+  codex-yolo [codex args...]
+  codex-yolo --get-usage [--output-dir DIR] [--machine-name NAME] [--machine-id ID]
+  codex-yolo --update-cache-dir [DIR] [--machine-name NAME] [--machine-id ID]
+  codex-yolo -h | --help
+
+Commands:
+  --get-usage
+      Refresh token usage, print aggregate stats, start the refreshable local
+      dashboard, and open it in the browser.
+
+  --update-cache-dir [DIR]
+      Same as --get-usage, but with an optional output/cache directory argument.
+      Use this for a shared cloud-synced folder.
+
+Options for usage commands:
+  --output-dir DIR, --cache-dir DIR
+      Directory for index.html, codex-token-usage.csv, codex-token-usage.json,
+      and per-computer snapshots. Default: ~/Downloads/codex-token-usage or
+      CODEX_TOKEN_USAGE_OUTPUT_DIR.
+
+  --machine-name NAME
+      Human-readable computer label in shared reports. Default: hostname or
+      CODEX_TOKEN_USAGE_MACHINE_NAME.
+
+  --machine-id ID
+      Stable snapshot file ID for this computer. Default: slug of machine name.
+
+Shared folder behavior:
+  Each computer writes machines/<machine-id>.json into the output directory.
+  index.html totals all snapshots found there and shows per-computer usage.
+
+Environment:
+  CODEX_YOLO_EDIT_REPLY=y|a
+  CODEX_YOLO_COMMAND_REPLY=y|p
+  CODEX_YOLO_REPLY=y|a|p
+  CODEX_YOLO_SKIP_STATS=1
+  CODEX_YOLO_STATS_REFRESH=/path/to/refresh-codex-token-usage.command
+  CODEX_YOLO_STATS_OPEN=/path/to/open-refreshable-codex-token-usage.command
+  CODEX_TOKEN_USAGE_OUTPUT_DIR=/path/to/output
+  CODEX_TOKEN_USAGE_MACHINE_NAME="Laptop"
+  CODEX_TOKEN_USAGE_MACHINE_ID=laptop
+
+All other arguments are passed through to the Codex CLI. Use codex --help for
+Codex's own help.}
+}
+
+proc run_usage {stats_open usage_args} {
     if {$stats_open eq "" || ![file executable $stats_open]} {
         fail "token usage opener not found; set CODEX_YOLO_STATS_OPEN or CODEX_YOLO_STATS_REFRESH"
     }
 
     set usage_command [list $stats_open]
-    if {$output_dir ne ""} {
-        lappend usage_command "--output-dir" $output_dir
+    foreach item $usage_args {
+        lappend usage_command $item
     }
 
     if {[catch {exec {*}$usage_command 2>@1} usage_output]} {
@@ -44,14 +98,14 @@ proc run_usage {stats_open output_dir} {
     exit 0
 }
 
-proc usage_output_dir_from_args {command args_list} {
-    set output_dir ""
+proc usage_args_from_args {command args_list} {
+    set usage_args [list]
     set remaining $args_list
 
     if {$command eq "--update-cache-dir" && [llength $remaining] > 0} {
         set first [lindex $remaining 0]
         if {![string match "--*" $first]} {
-            set output_dir [file normalize $first]
+            lappend usage_args "--output-dir" [file normalize $first]
             set remaining [lrange $remaining 1 end]
         }
     }
@@ -64,7 +118,22 @@ proc usage_output_dir_from_args {command args_list} {
                 if {[llength $remaining] < 2} {
                     fail "$option requires a directory"
                 }
-                set output_dir [file normalize [lindex $remaining 1]]
+                lappend usage_args "--output-dir" [file normalize [lindex $remaining 1]]
+                set remaining [lrange $remaining 2 end]
+            }
+            --machine-name -
+            --machine-id {
+                if {[llength $remaining] < 2} {
+                    fail "$option requires a value"
+                }
+                lappend usage_args $option [lindex $remaining 1]
+                set remaining [lrange $remaining 2 end]
+            }
+            --port {
+                if {[llength $remaining] < 2} {
+                    fail "$option requires a port"
+                }
+                lappend usage_args $option [lindex $remaining 1]
                 set remaining [lrange $remaining 2 end]
             }
             default {
@@ -73,7 +142,15 @@ proc usage_output_dir_from_args {command args_list} {
         }
     }
 
-    return $output_dir
+    return $usage_args
+}
+
+if {[llength $argv] > 0} {
+    set first_arg [lindex $argv 0]
+    if {$first_arg eq "-h" || $first_arg eq "--help"} {
+        print_help
+        exit 0
+    }
 }
 
 if {[info exists env(CODEX_YOLO_REPLY)]} {
@@ -110,7 +187,7 @@ if {$command_reply ne "p" && $command_reply ne "y"} {
     fail "CODEX_YOLO_COMMAND_REPLY must be either 'p' or 'y'"
 }
 
-set script_dir [file dirname [file normalize [info script]]]
+set script_dir $env(CODEX_YOLO_SCRIPT_DIR)
 set bundled_stats_refresh [file normalize [file join $script_dir .. token-tracker refresh-codex-token-usage.command]]
 set bundled_stats_open [file normalize [file join $script_dir .. token-tracker open-refreshable-codex-token-usage.command]]
 set stats_refresh ""
@@ -136,8 +213,8 @@ if {[info exists env(CODEX_YOLO_STATS_OPEN)]} {
 if {[llength $argv] > 0} {
     set command [lindex $argv 0]
     if {$command eq "--get-usage" || $command eq "--update-cache-dir"} {
-        set output_dir [usage_output_dir_from_args $command [lrange $argv 1 end]]
-        run_usage $stats_open $output_dir
+        set usage_args [usage_args_from_args $command [lrange $argv 1 end]]
+        run_usage $stats_open $usage_args
     }
 }
 
@@ -186,3 +263,4 @@ if {![info exists env(CODEX_YOLO_SKIP_STATS)] && $stats_refresh ne "" && [file e
 }
 
 exit $codex_exit
+EXPECT

@@ -53,12 +53,28 @@ Print usage stats and open the refreshable token dashboard:
 ./codex-yolo/codex-yolo --get-usage
 ```
 
+Show supported wrapper commands and options:
+
+```bash
+./codex-yolo/codex-yolo -h
+```
+
 Use a specific report folder without setting an environment variable:
 
 ```bash
 ./codex-yolo/codex-yolo --get-usage --output-dir /path/to/output
 ./codex-yolo/codex-yolo --update-cache-dir /path/to/output
 ```
+
+For a shared cloud folder, run the same command on each computer. Each computer writes `machines/<machine-id>.json`; `index.html` aggregates all machine snapshots and shows both per-computer and total usage.
+
+Customize the computer label:
+
+```bash
+./codex-yolo/codex-yolo --update-cache-dir /path/to/output --machine-name "Work Laptop"
+```
+
+Use `--machine-id` if two computers have the same hostname.
 
 Install `codex-yolo` into `/usr/local/bin`:
 

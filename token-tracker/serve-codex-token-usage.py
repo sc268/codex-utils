@@ -24,9 +24,11 @@ class TokenUsageHandler(SimpleHTTPRequestHandler):
         *args: Any,
         directory: str | None = None,
         generator: str | None = None,
+        generator_args: list[str] | None = None,
         **kwargs: Any,
     ) -> None:
         self.generator = generator
+        self.generator_args = generator_args or []
         super().__init__(*args, directory=directory, **kwargs)
 
     def do_POST(self) -> None:
@@ -42,7 +44,7 @@ class TokenUsageHandler(SimpleHTTPRequestHandler):
 
         try:
             result = subprocess.run(
-                [sys.executable, "-B", str(script), "--output-dir", str(report_dir)],
+                [sys.executable, "-B", str(script), "--output-dir", str(report_dir), *self.generator_args],
                 cwd=str(report_dir),
                 text=True,
                 stdout=subprocess.PIPE,
@@ -83,6 +85,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--directory", default=os.environ.get("CODEX_TOKEN_USAGE_OUTPUT_DIR", str(Path.home() / "Downloads" / "codex-token-usage")))
     parser.add_argument("--generator", default=str(Path(__file__).resolve().parent / "codex_token_usage_report.py"))
+    parser.add_argument("--machine-name", default=None)
+    parser.add_argument("--machine-id", default=None)
     parser.add_argument("--daemonize", action="store_true", help="Detach into the background before serving.")
     parser.add_argument("--log-file", default=None, help="Log file to use with --daemonize.")
     parser.add_argument("--pid-file", default=None, help="Write the background server PID to this file.")
@@ -119,6 +123,11 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
     directory = str(Path(args.directory).expanduser().resolve())
     generator = str(Path(args.generator).expanduser().resolve())
+    generator_args: list[str] = []
+    if args.machine_name:
+        generator_args.extend(["--machine-name", args.machine_name])
+    if args.machine_id:
+        generator_args.extend(["--machine-id", args.machine_id])
 
     if args.daemonize:
         child_pid = daemonize(args.log_file)
@@ -130,7 +139,13 @@ def main(argv: list[str]) -> int:
             return 0
 
     def handler(*handler_args: Any, **handler_kwargs: Any) -> TokenUsageHandler:
-        return TokenUsageHandler(*handler_args, directory=directory, generator=generator, **handler_kwargs)
+        return TokenUsageHandler(
+            *handler_args,
+            directory=directory,
+            generator=generator,
+            generator_args=generator_args,
+            **handler_kwargs,
+        )
 
     server = ThreadingHTTPServer((args.host, args.port), handler)
     url = f"http://{args.host}:{args.port}/index.html"

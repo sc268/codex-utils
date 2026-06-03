@@ -19,6 +19,7 @@ Generated files:
 - `index.html`
 - `codex-token-usage.csv`
 - `codex-token-usage.json`
+- `machines/<machine-id>.json`
 
 Generate or refresh the report:
 
@@ -35,6 +36,8 @@ Open the localhost report with an in-page refresh button:
 
 That command also prints the latest aggregate usage stats.
 
+Shared cloud folders are supported. Run the refresh command on each computer with the same `--output-dir`; each computer updates its own `machines/<machine-id>.json` snapshot, and the top-level report aggregates all snapshots.
+
 Use a custom output directory:
 
 ```bash
@@ -46,6 +49,14 @@ or:
 ```bash
 export CODEX_TOKEN_USAGE_OUTPUT_DIR=/path/to/output
 ```
+
+Use a custom computer label:
+
+```bash
+./refresh-codex-token-usage.command --output-dir /path/to/output --machine-name "Work Laptop"
+```
+
+Use `--machine-id` or `CODEX_TOKEN_USAGE_MACHINE_ID` if two computers have the same hostname.
 
 Use a custom browser opener command:
 

@@ -15,6 +15,12 @@ CODEX_YOLO_COMMAND_REPLY=y codex-yolo
 CODEX_YOLO_REPLY=y codex-yolo
 ```
 
+Show supported commands and options:
+
+```bash
+codex-yolo -h
+```
+
 Token tracker integration:
 
 ```bash
@@ -32,6 +38,14 @@ Use a specific report folder without setting `CODEX_TOKEN_USAGE_OUTPUT_DIR`:
 ```bash
 codex-yolo --get-usage --output-dir /path/to/output
 codex-yolo --update-cache-dir /path/to/output
+```
+
+When multiple computers use the same cloud output folder, each one writes a snapshot under `machines/`. The generated `index.html` totals every snapshot and includes a per-computer breakdown.
+
+Customize the computer label:
+
+```bash
+codex-yolo --update-cache-dir /path/to/output --machine-name "Work Laptop"
 ```
 
 When installed with `./install.sh`, the token tracker support files are installed with the wrapper. If you use a custom tracker path, set `CODEX_YOLO_STATS_REFRESH` or `CODEX_YOLO_STATS_OPEN`.

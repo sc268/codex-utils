@@ -13,6 +13,7 @@ import argparse
 import csv
 import json
 import os
+import socket
 import re
 import sys
 from collections import defaultdict
@@ -117,6 +118,18 @@ def clean_text(value: Any, max_len: int = 180) -> str:
     if len(text) > max_len:
         return f"{text[: max_len - 3]}..."
     return text
+
+
+def slugify(value: str, fallback: str = "machine") -> str:
+    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", value.strip().lower()).strip(".-_")
+    return slug[:80] or fallback
+
+
+def default_machine_name() -> str:
+    configured = os.environ.get("CODEX_TOKEN_USAGE_MACHINE_NAME") or os.environ.get("CODEX_TOKEN_USAGE_MACHINE")
+    if configured:
+        return configured
+    return socket.gethostname() or "machine"
 
 
 def content_text(content: Any) -> str:
@@ -317,6 +330,25 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
     by_day: dict[str, dict[str, int]] = defaultdict(empty_usage)
     by_model: dict[str, dict[str, int]] = defaultdict(empty_usage)
     by_cwd: dict[str, dict[str, int]] = defaultdict(empty_usage)
+    by_machine: dict[str, dict[str, Any]] = {}
+
+    for record in records:
+        machine_id = str(record.get("machine_id") or "unknown")
+        machine_name = str(record.get("machine_name") or machine_id or "unknown")
+        if machine_id not in by_machine:
+            by_machine[machine_id] = {
+                "machine_id": machine_id,
+                "name": machine_name,
+                "session_count": 0,
+                "tracked_session_count": 0,
+                "untracked_session_count": 0,
+                **empty_usage(),
+            }
+        by_machine[machine_id]["session_count"] += 1
+        if record.get("has_usage"):
+            by_machine[machine_id]["tracked_session_count"] += 1
+        else:
+            by_machine[machine_id]["untracked_session_count"] += 1
 
     for record in tracked:
         usage = {key: int(record.get(key, 0) or 0) for key in USAGE_KEYS}
@@ -326,6 +358,9 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
         cwd = str(record.get("cwd") or "unknown")
         add_usage(by_model[model], usage)
         add_usage(by_cwd[cwd], usage)
+        machine_id = str(record.get("machine_id") or "unknown")
+        if machine_id in by_machine:
+            add_usage(by_machine[machine_id], usage)
 
     def sorted_usage(mapping: dict[str, dict[str, int]]) -> list[dict[str, Any]]:
         return [
@@ -340,13 +375,20 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
     top_sessions = sorted(tracked, key=lambda item: int(item.get("total_tokens", 0) or 0), reverse=True)[:20]
 
     daily = [{"name": name, **usage} for name, usage in sorted(by_day.items(), key=lambda item: item[0])]
+    machines = sorted(
+        by_machine.values(),
+        key=lambda item: (int(item.get("total_tokens", 0) or 0), str(item.get("name") or "")),
+        reverse=True,
+    )
 
     return {
         "session_count": len(records),
         "tracked_session_count": len(tracked),
         "untracked_session_count": len(records) - len(tracked),
+        "machine_count": len(machines),
         "totals": totals,
         "daily": daily,
+        "machines": machines,
         "models": sorted_usage(by_model),
         "workdirs": sorted_usage(by_cwd)[:25],
         "top_sessions": top_sessions,
@@ -359,6 +401,8 @@ def write_csv(path: Path, records: list[dict[str, Any]]) -> None:
         "started_local",
         "ended_local",
         "duration_minutes",
+        "machine_name",
+        "machine_id",
         "session_id",
         "status",
         "total_tokens",
@@ -595,6 +639,9 @@ def html_report(report: dict[str, Any]) -> str:
     .daily-table {
       min-width: 460px;
     }
+    .machine-table {
+      min-width: 760px;
+    }
     .daily-table th {
       cursor: default;
     }
@@ -677,6 +724,28 @@ def html_report(report: dict[str, Any]) -> str:
 
     <section class="panel">
       <div class="section-head">
+        <h2>Computer Breakdown</h2>
+      </div>
+      <div class="table-wrap">
+        <table class="machine-table">
+          <thead>
+            <tr>
+              <th>Computer</th>
+              <th>Total</th>
+              <th>Input</th>
+              <th>Cached</th>
+              <th>Output</th>
+              <th>Reasoning</th>
+              <th>Sessions</th>
+            </tr>
+          </thead>
+          <tbody id="machineBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
         <h2>Total Daily Usage</h2>
         <div class="legend">
           <span><i class="swatch" style="background: var(--accent)"></i>Total tokens</span>
@@ -738,6 +807,7 @@ def html_report(report: dict[str, Any]) -> str:
               <th data-key="output_tokens">Output</th>
               <th data-key="reasoning_output_tokens">Reasoning</th>
               <th data-key="turns_with_usage">Turns</th>
+              <th data-key="machine_name">Machine</th>
               <th data-key="model">Model</th>
               <th data-key="cwd">Folder</th>
               <th data-key="first_user_message">First Message</th>
@@ -787,7 +857,8 @@ def html_report(report: dict[str, Any]) -> str:
 
     function renderMeta() {
       const generated = report.metadata.generated_local || report.metadata.generated_at || "";
-      const source = report.metadata.codex_sessions_dir || "";
+      const snapshotDir = report.metadata.snapshot_dir || "";
+      const source = snapshotDir ? `${number(summary.machine_count || 0)} computer snapshots in ${snapshotDir}` : (report.metadata.codex_sessions_dir || "");
       document.getElementById("meta").textContent = `Generated ${generated}. Source: ${source}`;
     }
 
@@ -833,8 +904,28 @@ def html_report(report: dict[str, Any]) -> str:
         metric("Output", number(totals.output_tokens), "Visible plus reasoning output"),
         metric("Reasoning", number(totals.reasoning_output_tokens), "Subset of output tokens"),
         metric("Sessions", number(all), `${number(summary.untracked_session_count || 0)} without token_count`),
-        metric("Models", number((summary.models || []).length), "Detected from turn context")
+        metric("Computers", number(summary.machine_count || 0), `${number((summary.models || []).length)} models`)
       ].join("");
+    }
+
+    function renderMachineTable() {
+      const data = summary.machines || [];
+      const body = document.getElementById("machineBody");
+      if (!data.length) {
+        body.innerHTML = '<tr><td colspan="7">No computer usage found.</td></tr>';
+        return;
+      }
+      body.innerHTML = data.map(machine => `
+        <tr>
+          <td>${escapeHtml(machine.name || machine.machine_id || "unknown")}</td>
+          <td class="num">${number(machine.total_tokens)}</td>
+          <td class="num">${number(machine.input_tokens)}</td>
+          <td class="num">${number(machine.cached_input_tokens)}</td>
+          <td class="num">${number(machine.output_tokens)}</td>
+          <td class="num">${number(machine.reasoning_output_tokens)}</td>
+          <td class="num">${number(machine.tracked_session_count || 0)} / ${number(machine.session_count || 0)}</td>
+        </tr>
+      `).join("");
     }
 
     function sessionsForDate(date) {
@@ -1009,6 +1100,8 @@ def html_report(report: dict[str, Any]) -> str:
       if (q) {
         rows = rows.filter(row => [
           row.session_id,
+          row.machine_name,
+          row.machine_id,
           row.model,
           row.cwd,
           row.first_user_message,
@@ -1039,6 +1132,7 @@ def html_report(report: dict[str, Any]) -> str:
           <td class="num">${number(row.output_tokens)}</td>
           <td class="num">${number(row.reasoning_output_tokens)}</td>
           <td class="num">${number(row.turns_with_usage)}</td>
+          <td>${escapeHtml(row.machine_name || row.machine_id || "unknown")}</td>
           <td>${escapeHtml(row.model || "unknown")}</td>
           <td class="path">${escapeHtml(row.cwd || "unknown")}</td>
           <td class="prompt">${escapeHtml(row.first_user_message || "")}</td>
@@ -1066,6 +1160,7 @@ def html_report(report: dict[str, Any]) -> str:
     renderMeta();
     wireRefreshButton();
     renderMetrics();
+    renderMachineTable();
     renderDailyTotalChart();
     renderDailyTotalsTable();
     renderDailyChart();
@@ -1082,9 +1177,12 @@ def write_html(path: Path, report: dict[str, Any]) -> None:
     path.write_text(html_report(report), encoding="utf-8")
 
 
-def build_report(codex_home: Path) -> dict[str, Any]:
+def build_report(codex_home: Path, machine_id: str, machine_name: str) -> dict[str, Any]:
     files = iter_session_files(codex_home)
     records = [parse_session_file(path, codex_home) for path in files]
+    for record in records:
+        record["machine_id"] = machine_id
+        record["machine_name"] = machine_name
     records.sort(key=lambda record: record.get("started_at") or "", reverse=True)
     generated_at = datetime.now(timezone.utc)
 
@@ -1094,6 +1192,94 @@ def build_report(codex_home: Path) -> dict[str, Any]:
             "generated_local": local_display(generated_at),
             "codex_home": str(codex_home),
             "codex_sessions_dir": str(codex_home / "sessions"),
+            "machine_id": machine_id,
+            "machine_name": machine_name,
+            "report_scope": "machine",
+            "script_version": "2026-06-03",
+        },
+        "summary": aggregate(records),
+        "records": records,
+    }
+
+
+def machine_snapshot_dir(output_dir: Path) -> Path:
+    return output_dir / "machines"
+
+
+def write_machine_snapshot(report: dict[str, Any], output_dir: Path) -> Path:
+    metadata = report.get("metadata", {})
+    machine_id = slugify(str(metadata.get("machine_id") or metadata.get("machine_name") or "machine"))
+    snapshots_dir = machine_snapshot_dir(output_dir)
+    snapshots_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_path = snapshots_dir / f"{machine_id}.json"
+    snapshot_path.write_text(json.dumps(report, ensure_ascii=True, indent=2), encoding="utf-8")
+    return snapshot_path
+
+
+def load_machine_reports(output_dir: Path) -> list[dict[str, Any]]:
+    snapshots_dir = machine_snapshot_dir(output_dir)
+    reports: list[dict[str, Any]] = []
+    if not snapshots_dir.exists():
+        return reports
+
+    for snapshot_path in sorted(snapshots_dir.glob("*.json")):
+        try:
+            data = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        metadata = data.get("metadata")
+        records = data.get("records")
+        if not isinstance(metadata, dict) or not isinstance(records, list):
+            continue
+        machine_id = slugify(str(metadata.get("machine_id") or snapshot_path.stem))
+        machine_name = str(metadata.get("machine_name") or machine_id)
+        normalized_records: list[dict[str, Any]] = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            row = dict(record)
+            row["machine_id"] = str(row.get("machine_id") or machine_id)
+            row["machine_name"] = str(row.get("machine_name") or machine_name)
+            normalized_records.append(row)
+        data["records"] = normalized_records
+        reports.append(data)
+    return reports
+
+
+def combine_machine_reports(reports: list[dict[str, Any]], output_dir: Path) -> dict[str, Any]:
+    generated_at = datetime.now(timezone.utc)
+    records: list[dict[str, Any]] = []
+    machines: list[dict[str, Any]] = []
+
+    for report in reports:
+        metadata = report.get("metadata", {})
+        machine_id = str(metadata.get("machine_id") or "unknown")
+        machine_name = str(metadata.get("machine_name") or machine_id)
+        machines.append(
+            {
+                "machine_id": machine_id,
+                "machine_name": machine_name,
+                "generated_at": metadata.get("generated_at", ""),
+                "generated_local": metadata.get("generated_local", ""),
+                "codex_sessions_dir": metadata.get("codex_sessions_dir", ""),
+            }
+        )
+        records.extend(report.get("records", []))
+
+    records.sort(
+        key=lambda record: (record.get("started_at") or "", record.get("machine_name") or ""),
+        reverse=True,
+    )
+
+    return {
+        "metadata": {
+            "generated_at": generated_at.isoformat(),
+            "generated_local": local_display(generated_at),
+            "snapshot_dir": str(machine_snapshot_dir(output_dir)),
+            "report_scope": "combined",
+            "machine_reports": machines,
             "script_version": "2026-06-03",
         },
         "summary": aggregate(records),
@@ -1122,6 +1308,8 @@ def default_output_dir() -> Path:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     default_codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    machine_name = default_machine_name()
+    machine_id = os.environ.get("CODEX_TOKEN_USAGE_MACHINE_ID", "")
 
     parser = argparse.ArgumentParser(description="Generate a local Codex token usage HTML report.")
     parser.add_argument(
@@ -1134,6 +1322,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=str(default_output_dir()),
         help="Directory for index.html, CSV, and JSON. Default: ~/Downloads/codex-token-usage or CODEX_TOKEN_USAGE_OUTPUT_DIR.",
     )
+    parser.add_argument(
+        "--machine-name",
+        default=machine_name,
+        help="Label for this computer in shared reports. Default: hostname or CODEX_TOKEN_USAGE_MACHINE_NAME.",
+    )
+    parser.add_argument(
+        "--machine-id",
+        default=machine_id,
+        help="Stable ID for this computer's snapshot file. Default: CODEX_TOKEN_USAGE_MACHINE_ID or slug of --machine-name.",
+    )
     return parser.parse_args(argv)
 
 
@@ -1141,18 +1339,24 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
     codex_home = Path(args.codex_home).expanduser().resolve()
     output_dir = Path(args.output_dir).expanduser().resolve()
+    machine_name = str(args.machine_name or default_machine_name())
+    machine_id = slugify(str(args.machine_id or machine_name))
 
-    report = build_report(codex_home)
+    local_report = build_report(codex_home, machine_id, machine_name)
+    snapshot_path = write_machine_snapshot(local_report, output_dir)
+    report = combine_machine_reports(load_machine_reports(output_dir), output_dir)
     paths = write_report(report, output_dir)
     totals = report["summary"]["totals"]
 
+    print(f"Wrote {snapshot_path}")
     print(f"Wrote {paths['html']}")
     print(f"Wrote {paths['csv']}")
     print(f"Wrote {paths['json']}")
     print(
-        "Tracked {tracked}/{all_sessions} sessions, total tokens: {tokens}".format(
+        "Tracked {tracked}/{all_sessions} sessions across {machines} computers, total tokens: {tokens}".format(
             tracked=report["summary"]["tracked_session_count"],
             all_sessions=report["summary"]["session_count"],
+            machines=report["summary"].get("machine_count", 0),
             tokens=f"{totals['total_tokens']:,}",
         )
     )
