@@ -4,7 +4,7 @@ Small local utilities for Codex CLI users.
 
 ## Tools
 
-- `codex-yolo/`: an Expect wrapper that runs `codex` interactively and auto-accepts common approval prompts.
+- `codex-yolo/`: a Codex CLI launcher that uses Codex's native approval/sandbox bypass option and integrates token usage reporting.
 - `token-tracker/`: a local token usage reporter that scans `~/.codex/sessions` and generates an offline HTML dashboard, CSV, and JSON.
 
 ## Token Tracker Output
@@ -41,7 +41,7 @@ Open a localhost dashboard where the in-page `Refresh Logs` button works:
 ./token-tracker/open-refreshable-codex-token-usage.command
 ```
 
-Run Codex through the approval helper from the repo checkout:
+Run Codex through the YOLO launcher from the repo checkout:
 
 ```bash
 ./codex-yolo/codex-yolo

@@ -1,18 +1,11 @@
 # codex-yolo
 
-`codex-yolo` is an Expect wrapper around the Codex CLI. It watches for common approval prompts and answers them automatically.
+`codex-yolo` is a Codex CLI launcher that runs normal Codex sessions with Codex's native `--dangerously-bypass-approvals-and-sandbox` option.
 
-Defaults:
-
-- edit prompts: `a`, yes and do not ask again for these files
-- command-prefix prompts: `p`, yes and do not ask again for this command prefix
-
-Override behavior:
+Use a different Codex binary:
 
 ```bash
-CODEX_YOLO_EDIT_REPLY=y codex-yolo
-CODEX_YOLO_COMMAND_REPLY=y codex-yolo
-CODEX_YOLO_REPLY=y codex-yolo
+CODEX_YOLO_CODEX_BIN=/path/to/codex codex-yolo
 ```
 
 Show supported commands and options:
