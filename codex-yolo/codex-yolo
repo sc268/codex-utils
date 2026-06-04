@@ -4,7 +4,54 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 export CODEX_YOLO_SCRIPT_DIR="$SCRIPT_DIR"
 
-exec expect -f - -- "$@" <<'EXPECT'
+RUN_POST_STATS=1
+
+case "${1:-}" in
+  --version|-V|version)
+    exec codex "$@"
+    ;;
+  -h|--help|--get-usage|--update-cache-dir)
+    RUN_POST_STATS=0
+    ;;
+esac
+
+post_stats_refresh() {
+  if [[ -n "${CODEX_YOLO_SKIP_STATS:-}" ]]; then
+    return
+  fi
+
+  local stats_refresh="${CODEX_YOLO_STATS_REFRESH:-$SCRIPT_DIR/../token-tracker/refresh-codex-token-usage.command}"
+  if [[ ! -x "$stats_refresh" ]]; then
+    return
+  fi
+
+  local mode="${CODEX_YOLO_STATS_MODE:-async}"
+  case "$mode" in
+    off)
+      return
+      ;;
+    sync)
+      "$stats_refresh" >&2 || printf 'codex-yolo: token stats refresh failed\n' >&2
+      ;;
+    async)
+      local output_dir="${CODEX_TOKEN_USAGE_OUTPUT_DIR:-${HOME:-.}/Downloads/codex-token-usage}"
+      if ! mkdir -p "$output_dir"; then
+        printf 'codex-yolo: token stats refresh not started; cannot create %s\n' "$output_dir" >&2
+        return
+      fi
+      local log_path="$output_dir/codex-yolo-stats-refresh.log"
+      local report_url="file://$output_dir/index.html"
+      nohup "$stats_refresh" > "$log_path" 2>&1 &
+      printf 'codex-yolo: token stats refresh started in background, log %s, check %s\n' "$log_path" "$report_url" >&2
+      ;;
+    *)
+      printf 'codex-yolo: unknown CODEX_YOLO_STATS_MODE %s; expected async, sync, or off\n' "$mode" >&2
+      ;;
+  esac
+}
+
+set +e
+expect -f - -- "$@" <<'EXPECT'
 
 # Run Codex interactively and auto-accept common approval prompts.
 #
@@ -18,6 +65,7 @@ exec expect -f - -- "$@" <<'EXPECT'
 #   CODEX_YOLO_REPLY=y  # legacy shortcut: use y for both
 #   CODEX_YOLO_STATS_REFRESH=/path/to/refresh-codex-token-usage.command
 #   CODEX_YOLO_STATS_OPEN=/path/to/open-refreshable-codex-token-usage.command
+#   CODEX_YOLO_STATS_MODE=async|sync|off
 #   CODEX_YOLO_SKIP_STATS=1
 
 set timeout -1
@@ -68,6 +116,7 @@ Environment:
   CODEX_YOLO_COMMAND_REPLY=y|p
   CODEX_YOLO_REPLY=y|a|p
   CODEX_YOLO_SKIP_STATS=1
+  CODEX_YOLO_STATS_MODE=async|sync|off
   CODEX_YOLO_STATS_REFRESH=/path/to/refresh-codex-token-usage.command
   CODEX_YOLO_STATS_OPEN=/path/to/open-refreshable-codex-token-usage.command
   CODEX_TOKEN_USAGE_OUTPUT_DIR=/path/to/output
@@ -254,13 +303,14 @@ if {[catch {wait} wait_result]} {
     }
 }
 
-if {![info exists env(CODEX_YOLO_SKIP_STATS)] && $stats_refresh ne "" && [file executable $stats_refresh]} {
-    if {[catch {exec $stats_refresh 2>@1} stats_output]} {
-        puts stderr "codex-yolo: token stats refresh failed: $stats_output"
-    } elseif {$stats_output ne ""} {
-        puts stderr $stats_output
-    }
-}
-
 exit $codex_exit
 EXPECT
+
+codex_exit=$?
+set -e
+
+if [[ "$RUN_POST_STATS" == "1" ]]; then
+  post_stats_refresh
+fi
+
+exit "$codex_exit"

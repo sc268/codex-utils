@@ -57,3 +57,9 @@ Disable stats refresh:
 ```bash
 CODEX_YOLO_SKIP_STATS=1 codex-yolo
 ```
+
+Normal runs refresh token stats in the background after Codex exits. Use the old blocking behavior only when needed:
+
+```bash
+CODEX_YOLO_STATS_MODE=sync codex-yolo
+```

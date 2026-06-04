@@ -92,4 +92,4 @@ The installer also copies the token tracker support files into:
 
 Override `PREFIX=/some/path` to install somewhere else. `codex-yolo --get-usage` uses the installed open script automatically. Set `CODEX_YOLO_STATS_OPEN` only if the open script lives somewhere else.
 
-Set `CODEX_YOLO_SKIP_STATS=1` to skip token report refresh after a `codex-yolo` run.
+Normal `codex-yolo` runs refresh token stats in the background after Codex exits, so the shell prompt is not blocked by report generation. Set `CODEX_YOLO_STATS_MODE=sync` for blocking refresh, `CODEX_YOLO_STATS_MODE=off` to disable it, or `CODEX_YOLO_SKIP_STATS=1` to skip token report refresh after a run.
