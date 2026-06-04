@@ -3,8 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CODEX_BIN="${CODEX_YOLO_CODEX_BIN:-codex}"
-CODEX_APPROVAL_POLICY="${CODEX_YOLO_APPROVAL_POLICY:-never}"
-CODEX_SANDBOX_MODE="${CODEX_YOLO_SANDBOX_MODE:-danger-full-access}"
 RUN_POST_STATS=1
 
 print_help() {
@@ -16,9 +14,9 @@ Usage:
   codex-yolo -h | --help
 
 Behavior:
-  Normal Codex sessions are launched with Codex's native
-  --dangerously-bypass-approvals-and-sandbox flag, --ask-for-approval never,
-  and --sandbox danger-full-access.
+  Normal Codex sessions are launched through Expect. codex-yolo watches for
+  Codex approval prompts and automatically answers command prompts with p and
+  edit prompts with a by default.
 
 Commands:
   --get-usage
@@ -48,8 +46,9 @@ Shared folder behavior:
 
 Environment:
   CODEX_YOLO_CODEX_BIN=/path/to/codex
-  CODEX_YOLO_APPROVAL_POLICY=never
-  CODEX_YOLO_SANDBOX_MODE=danger-full-access
+  CODEX_YOLO_EDIT_REPLY=a|y
+  CODEX_YOLO_COMMAND_REPLY=p|y
+  CODEX_YOLO_REPLY=y|a|p
   CODEX_YOLO_SKIP_STATS=1
   CODEX_YOLO_STATS_MODE=async|sync|off
   CODEX_YOLO_STATS_REFRESH=/path/to/refresh-codex-token-usage.command
@@ -182,11 +181,7 @@ case "${1:-}" in
 esac
 
 set +e
-"$CODEX_BIN" \
-  --dangerously-bypass-approvals-and-sandbox \
-  --ask-for-approval "$CODEX_APPROVAL_POLICY" \
-  --sandbox "$CODEX_SANDBOX_MODE" \
-  "$@"
+expect "$SCRIPT_DIR/codex-yolo.expect" "$CODEX_BIN" "$@"
 codex_exit=$?
 set -e
 

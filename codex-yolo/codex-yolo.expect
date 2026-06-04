@@ -1,0 +1,102 @@
+#!/usr/bin/expect -f
+set timeout -1
+
+set codex_bin [lindex $argv 0]
+set codex_args [lrange $argv 1 end]
+set edit_reply "a"
+set command_reply "p"
+set last_auto_reply_ms 0
+
+proc fail {message} {
+    puts stderr "codex-yolo: $message"
+    exit 2
+}
+
+if {[info exists env(CODEX_YOLO_REPLY)]} {
+    switch -- $env(CODEX_YOLO_REPLY) {
+        y {
+            set edit_reply "y"
+            set command_reply "y"
+        }
+        a {
+            set edit_reply "a"
+        }
+        p {
+            set command_reply "p"
+        }
+        default {
+            fail "CODEX_YOLO_REPLY must be one of: y, a, p"
+        }
+    }
+}
+
+if {[info exists env(CODEX_YOLO_EDIT_REPLY)]} {
+    set edit_reply $env(CODEX_YOLO_EDIT_REPLY)
+}
+
+if {[info exists env(CODEX_YOLO_COMMAND_REPLY)]} {
+    set command_reply $env(CODEX_YOLO_COMMAND_REPLY)
+}
+
+if {$edit_reply ne "a" && $edit_reply ne "y"} {
+    fail "CODEX_YOLO_EDIT_REPLY must be either 'a' or 'y'"
+}
+
+if {$command_reply ne "p" && $command_reply ne "y"} {
+    fail "CODEX_YOLO_COMMAND_REPLY must be either 'p' or 'y'"
+}
+
+spawn -noecho $codex_bin {*}$codex_args
+
+set edit_prompt {Would you like to make the following edits\?}
+set command_prompt {Would you like to run the following command\?}
+set command_prefix_prompt {Yes, and don't ask again for commands that start}
+
+if {[catch {
+    interact -nobuffer -o \
+        -re $edit_prompt {
+            set now_ms [clock milliseconds]
+            if {$now_ms - $last_auto_reply_ms > 800} {
+                set last_auto_reply_ms $now_ms
+                after 200
+                send -- "$edit_reply\r"
+            }
+        } \
+        -re $command_prompt {
+            set now_ms [clock milliseconds]
+            if {$now_ms - $last_auto_reply_ms > 800} {
+                set last_auto_reply_ms $now_ms
+                after 200
+                send -- "$command_reply\r"
+            }
+        } \
+        -re $command_prefix_prompt {
+            set now_ms [clock milliseconds]
+            if {$now_ms - $last_auto_reply_ms > 800} {
+                set last_auto_reply_ms $now_ms
+                after 100
+                send -- "$command_reply\r"
+            }
+        } \
+        eof {
+        }
+} interact_error]} {
+    if {![string match "*spawn id*not open*" $interact_error]} {
+        puts stderr "codex-yolo: interact ended: $interact_error"
+    }
+}
+
+set codex_exit 0
+if {[catch {wait} wait_result]} {
+    set codex_exit 1
+} elseif {[llength $wait_result] >= 4} {
+    set os_error [lindex $wait_result 2]
+    set status_value [lindex $wait_result 3]
+    if {$os_error == 0} {
+        set codex_exit $status_value
+    } else {
+        set codex_exit 1
+    }
+}
+
+exit $codex_exit

@@ -1,6 +1,11 @@
 # codex-yolo
 
-`codex-yolo` is a Codex CLI launcher that runs normal Codex sessions with Codex's native `--dangerously-bypass-approvals-and-sandbox`, `--ask-for-approval never`, and `--sandbox danger-full-access` options. That skips command approval prompts such as `Would you like to run the following command?`.
+`codex-yolo` is a Codex CLI launcher that uses Expect to auto-answer common approval prompts.
+
+Defaults:
+
+- command prompts such as `Would you like to run the following command?`: `p`, yes and do not ask again for matching command prefixes
+- edit prompts such as `Would you like to make the following edits?`: `a`, yes and do not ask again for these files
 
 Use a different Codex binary:
 
@@ -8,11 +13,12 @@ Use a different Codex binary:
 CODEX_YOLO_CODEX_BIN=/path/to/codex codex-yolo
 ```
 
-Override the approval or sandbox defaults:
+Override the approval defaults:
 
 ```bash
-CODEX_YOLO_APPROVAL_POLICY=on-request codex-yolo
-CODEX_YOLO_SANDBOX_MODE=workspace-write codex-yolo
+CODEX_YOLO_COMMAND_REPLY=y codex-yolo
+CODEX_YOLO_EDIT_REPLY=y codex-yolo
+CODEX_YOLO_REPLY=y codex-yolo
 ```
 
 Show supported commands and options:

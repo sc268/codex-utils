@@ -10,6 +10,7 @@ TARGET="$BIN_DIR/codex-yolo"
 
 install -d "$BIN_DIR" "$SHARE_DIR/codex-yolo" "$SHARE_DIR/token-tracker"
 install -m 755 "$SCRIPT_DIR/codex-yolo" "$SHARE_DIR/codex-yolo/codex-yolo"
+install -m 755 "$SCRIPT_DIR/codex-yolo.expect" "$SHARE_DIR/codex-yolo/codex-yolo.expect"
 install -m 755 "$REPO_DIR/token-tracker/codex_token_usage_report.py" "$SHARE_DIR/token-tracker/codex_token_usage_report.py"
 install -m 755 "$REPO_DIR/token-tracker/serve-codex-token-usage.py" "$SHARE_DIR/token-tracker/serve-codex-token-usage.py"
 install -m 755 "$REPO_DIR/token-tracker/refresh-codex-token-usage.command" "$SHARE_DIR/token-tracker/refresh-codex-token-usage.command"
