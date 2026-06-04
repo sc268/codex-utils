@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CODEX_BIN="${CODEX_YOLO_CODEX_BIN:-codex}"
+CODEX_APPROVAL_POLICY="${CODEX_YOLO_APPROVAL_POLICY:-never}"
+CODEX_SANDBOX_MODE="${CODEX_YOLO_SANDBOX_MODE:-danger-full-access}"
 RUN_POST_STATS=1
 
 print_help() {
@@ -15,7 +17,8 @@ Usage:
 
 Behavior:
   Normal Codex sessions are launched with Codex's native
-  --dangerously-bypass-approvals-and-sandbox flag.
+  --dangerously-bypass-approvals-and-sandbox flag, --ask-for-approval never,
+  and --sandbox danger-full-access.
 
 Commands:
   --get-usage
@@ -45,6 +48,8 @@ Shared folder behavior:
 
 Environment:
   CODEX_YOLO_CODEX_BIN=/path/to/codex
+  CODEX_YOLO_APPROVAL_POLICY=never
+  CODEX_YOLO_SANDBOX_MODE=danger-full-access
   CODEX_YOLO_SKIP_STATS=1
   CODEX_YOLO_STATS_MODE=async|sync|off
   CODEX_YOLO_STATS_REFRESH=/path/to/refresh-codex-token-usage.command
@@ -177,7 +182,11 @@ case "${1:-}" in
 esac
 
 set +e
-"$CODEX_BIN" --dangerously-bypass-approvals-and-sandbox "$@"
+"$CODEX_BIN" \
+  --dangerously-bypass-approvals-and-sandbox \
+  --ask-for-approval "$CODEX_APPROVAL_POLICY" \
+  --sandbox "$CODEX_SANDBOX_MODE" \
+  "$@"
 codex_exit=$?
 set -e
 

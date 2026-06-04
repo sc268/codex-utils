@@ -1,11 +1,18 @@
 # codex-yolo
 
-`codex-yolo` is a Codex CLI launcher that runs normal Codex sessions with Codex's native `--dangerously-bypass-approvals-and-sandbox` option.
+`codex-yolo` is a Codex CLI launcher that runs normal Codex sessions with Codex's native `--dangerously-bypass-approvals-and-sandbox`, `--ask-for-approval never`, and `--sandbox danger-full-access` options. That skips command approval prompts such as `Would you like to run the following command?`.
 
 Use a different Codex binary:
 
 ```bash
 CODEX_YOLO_CODEX_BIN=/path/to/codex codex-yolo
+```
+
+Override the approval or sandbox defaults:
+
+```bash
+CODEX_YOLO_APPROVAL_POLICY=on-request codex-yolo
+CODEX_YOLO_SANDBOX_MODE=workspace-write codex-yolo
 ```
 
 Show supported commands and options:
