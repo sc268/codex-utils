@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+import os
+import re
+import shutil
+import sys
+import time
+
+try:
+    import pexpect
+except ImportError:
+    print("codex-yolo: python pexpect is not installed", file=sys.stderr)
+    sys.exit(127)
+
+
+ANSI_RE = re.compile(
+    r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\a]*(?:\a|\x1b\\))"
+)
+SHORTCUT_RE_TEMPLATE = r"(?i)(^|[^a-z0-9])\({key}\)(?=[^a-z0-9]|$)"
+
+APPROVAL_WORDS = (
+    "would you like",
+    "approval",
+    "approve",
+    "allow",
+    "proceed",
+    "run the following command",
+    "make the following edits",
+    "execute",
+    "apply",
+)
+
+
+def fail(message):
+    print(f"codex-yolo: {message}", file=sys.stderr)
+    sys.exit(2)
+
+
+def env_reply(name, default, allowed):
+    value = os.environ.get(name, default)
+    if value not in allowed:
+        fail(f"{name} must be one of: {', '.join(allowed)}")
+    return value
+
+
+def strip_ansi(value):
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", "replace")
+    return ANSI_RE.sub("", value).replace("\r", "\n")
+
+
+def has_shortcut(value, key):
+    return re.search(SHORTCUT_RE_TEMPLATE.format(key=re.escape(key)), value) is not None
+
+
+def has_approval_context(value):
+    lower = value.lower()
+    return any(word in lower for word in APPROVAL_WORDS)
+
+
+def choose_reply(value, edit_reply, command_reply):
+    lower = value.lower()
+
+    if "would you like to make the following edits?" in lower:
+        return edit_reply
+    if "would you like to run the following command?" in lower:
+        return command_reply
+    if "yes, and don't ask again for commands that start" in lower:
+        return command_reply
+
+    if not has_approval_context(value):
+        return None
+
+    if has_shortcut(value, "a"):
+        return "a"
+    if has_shortcut(value, "p"):
+        return command_reply if command_reply == "p" else "p"
+    if has_shortcut(value, "y"):
+        return "y"
+    return None
+
+
+def main():
+    if len(sys.argv) < 2:
+        fail("usage: codex-yolo.pexpect CODEX_BIN [codex args...]")
+
+    codex_bin = sys.argv[1]
+    codex_args = sys.argv[2:]
+    edit_reply = env_reply("CODEX_YOLO_EDIT_REPLY", "a", ("a", "y"))
+    command_reply = env_reply("CODEX_YOLO_COMMAND_REPLY", "y", ("p", "y"))
+
+    reply = os.environ.get("CODEX_YOLO_REPLY")
+    if reply:
+        if reply == "a":
+            edit_reply = "a"
+        elif reply == "p":
+            command_reply = "p"
+        elif reply == "y":
+            edit_reply = "y"
+            command_reply = "y"
+        else:
+            fail("CODEX_YOLO_REPLY must be one of: y, a, p")
+
+    try:
+        terminal_size = shutil.get_terminal_size((80, 24))
+        child = pexpect.spawn(
+            codex_bin,
+            codex_args,
+            encoding="utf-8",
+            codec_errors="replace",
+            dimensions=(terminal_size.lines, terminal_size.columns),
+            timeout=None,
+        )
+    except Exception as exc:
+        print(f"codex-yolo: failed to start {codex_bin}: {exc}", file=sys.stderr)
+        return 127
+
+    buffer = ""
+    last_auto_reply = 0.0
+
+    def output_filter(data):
+        nonlocal buffer, last_auto_reply
+        buffer = (buffer + strip_ansi(data))[-5000:]
+        reply_value = choose_reply(buffer, edit_reply, command_reply)
+        now = time.monotonic()
+        if reply_value and now - last_auto_reply > 0.8:
+            last_auto_reply = now
+            time.sleep(0.15)
+            child.sendline(reply_value)
+        return data
+
+    try:
+        child.interact(escape_character=None, output_filter=output_filter)
+    except OSError:
+        pass
+    finally:
+        child.close()
+
+    if child.exitstatus is not None:
+        return child.exitstatus
+    if child.signalstatus is not None:
+        return 128 + child.signalstatus
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

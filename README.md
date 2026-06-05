@@ -4,7 +4,7 @@ Small local utilities for Codex CLI users.
 
 ## Tools
 
-- `codex-yolo/`: a Codex CLI launcher that uses Expect to auto-answer approval prompts and integrates token usage reporting.
+- `codex-yolo/`: a Codex CLI launcher that uses Expect-style approval automation by default, keeps native Codex bypass mode available, and integrates token usage reporting.
 - `token-tracker/`: a local token usage reporter that scans `~/.codex/sessions` and generates an offline HTML dashboard, CSV, and JSON.
 
 ## Token Tracker Output
@@ -78,16 +78,18 @@ Customize the computer label:
 
 Use `--machine-id` if two computers have the same hostname.
 
-Install `codex-yolo` into `/usr/local/bin`:
+Install `codex-yolo`:
 
 ```bash
 ./codex-yolo/install.sh
 ```
 
+On Linux, the default prefix is `~/.local`, so the command is installed as `~/.local/bin/codex-yolo`. On macOS, the default prefix is `/usr/local`.
+
 The installer also copies the token tracker support files into:
 
 ```bash
-/usr/local/share/codex-utils
+<prefix>/share/codex-utils
 ```
 
 Override `PREFIX=/some/path` to install somewhere else. `codex-yolo --get-usage` uses the installed open script automatically. Set `CODEX_YOLO_STATS_OPEN` only if the open script lives somewhere else.

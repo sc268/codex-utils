@@ -73,7 +73,16 @@ done
 URL="http://127.0.0.1:${PORT}/index.html"
 SERVER_LOG="$OUTPUT_DIR/token-usage-server.log"
 SERVER_PID="$OUTPUT_DIR/token-usage-server.pid"
-OPEN_CMD="${CODEX_TOKEN_USAGE_OPEN_CMD:-open}"
+
+if [[ -n "${CODEX_TOKEN_USAGE_OPEN_CMD:-}" ]]; then
+  OPEN_CMD="$CODEX_TOKEN_USAGE_OPEN_CMD"
+elif command -v xdg-open >/dev/null 2>&1; then
+  OPEN_CMD="xdg-open"
+elif command -v open >/dev/null 2>&1; then
+  OPEN_CMD="open"
+else
+  OPEN_CMD=""
+fi
 
 if [[ ${#GENERATOR_ARGS[@]} -gt 0 ]]; then
   CODEX_TOKEN_USAGE_REPORT_URL="$URL" "$SCRIPT_DIR/refresh-codex-token-usage.command" --output-dir "$OUTPUT_DIR" "${GENERATOR_ARGS[@]}"
@@ -115,4 +124,10 @@ if ! curl -fsS "$URL" >/dev/null 2>&1; then
   exit 1
 fi
 
-"$OPEN_CMD" "$URL"
+if [[ -n "$OPEN_CMD" ]]; then
+  if ! "$OPEN_CMD" "$URL"; then
+    echo "codex token usage dashboard is available at $URL" >&2
+  fi
+else
+  echo "codex token usage dashboard is available at $URL" >&2
+fi
