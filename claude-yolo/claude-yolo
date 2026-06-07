@@ -1,0 +1,114 @@
+#!/bin/bash
+# claude-yolo: launch Claude Code with --dangerously-skip-permissions and a
+# local MCP server that adds web_search + web_fetch.
+#
+# Why: when ANTHROPIC_BASE_URL points at a gateway/proxy, Claude's built-in
+# WebSearch/WebFetch (which run server-side on Anthropic's infra) are not
+# available. The bundled MCP server runs locally and hits the network directly,
+# so web access works regardless of the base URL and needs no paid API key.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLAUDE_BIN="${CLAUDE_YOLO_CLAUDE_BIN:-claude}"
+PYTHON_BIN="${CLAUDE_YOLO_PYTHON_BIN:-python3}"
+MCP_SERVER="${CLAUDE_YOLO_WEB_MCP:-$SCRIPT_DIR/web-mcp-server.py}"
+SKIP_PERMS="${CLAUDE_YOLO_SKIP_PERMISSIONS:-1}"
+WITH_WEB="${CLAUDE_YOLO_WEB:-1}"
+
+print_help() {
+  cat <<'EOF'
+Usage:
+  claude-yolo [claude args...]
+  claude-yolo -h | --help
+
+Behavior:
+  Runs the Claude Code CLI with --dangerously-skip-permissions and registers a
+  local MCP server exposing web_search and web_fetch tools. This restores web
+  access when ANTHROPIC_BASE_URL points at a gateway lacking Anthropic's
+  server-side web tools. No web search API key is required (web_search uses
+  DuckDuckGo's free HTML endpoint; web_fetch is a plain HTTP GET).
+
+  All Claude CLI flags pass through, so session management works:
+    claude-yolo --resume        resume a previous conversation (-r)
+    claude-yolo --continue      continue the most recent one (-c)
+    claude-yolo -p "prompt"     non-interactive print mode
+
+  Management subcommands are forwarded verbatim WITHOUT the yolo flags
+  (no --dangerously-skip-permissions, no injected web MCP server):
+    claude-yolo mcp list        claude-yolo auth        claude-yolo update
+
+Environment:
+  CLAUDE_YOLO_CLAUDE_BIN=/path/to/claude   Claude CLI binary (default: claude)
+  CLAUDE_YOLO_PYTHON_BIN=python3           Python for the MCP server
+  CLAUDE_YOLO_WEB_MCP=/path/to/server.py   Override the bundled MCP server path
+  CLAUDE_YOLO_WEB=0                         Do not register the web MCP server
+  CLAUDE_YOLO_SKIP_PERMISSIONS=0           Do not pass --dangerously-skip-permissions
+
+All other arguments are passed through to the Claude CLI. Use claude --help for
+Claude's own options.
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    print_help
+    exit 0
+    ;;
+esac
+
+if ! command -v "$CLAUDE_BIN" >/dev/null 2>&1; then
+  printf 'claude-yolo: claude binary %q not found; set CLAUDE_YOLO_CLAUDE_BIN\n' "$CLAUDE_BIN" >&2
+  exit 127
+fi
+
+# Management subcommands are not interactive/print sessions: they must not get
+# --dangerously-skip-permissions or the injected --mcp-config. Pass them
+# straight through to the Claude CLI (e.g. claude-yolo mcp list, auth, update).
+case "${1:-}" in
+  agents|auth|auto-mode|doctor|install|mcp|plugin|plugins|project|setup-token|ultrareview|update|upgrade)
+    exec "$CLAUDE_BIN" "$@"
+    ;;
+esac
+
+claude_args=()
+
+if [[ "$SKIP_PERMS" != "0" ]]; then
+  claude_args+=(--dangerously-skip-permissions)
+fi
+
+# Register the local web MCP server via a temp config passed with --mcp-config.
+# Claude merges this with any existing project/user MCP servers.
+mcp_config=""
+cleanup() {
+  [[ -n "$mcp_config" && -f "$mcp_config" ]] && rm -f "$mcp_config"
+}
+trap cleanup EXIT
+
+if [[ "$WITH_WEB" != "0" ]]; then
+  if [[ ! -r "$MCP_SERVER" ]]; then
+    printf 'claude-yolo: web MCP server not found at %q; set CLAUDE_YOLO_WEB_MCP or CLAUDE_YOLO_WEB=0\n' "$MCP_SERVER" >&2
+    exit 2
+  fi
+  if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+    printf 'claude-yolo: %q not found; set CLAUDE_YOLO_PYTHON_BIN or CLAUDE_YOLO_WEB=0\n' "$PYTHON_BIN" >&2
+    exit 127
+  fi
+
+  mcp_config="$(mktemp -t claude-yolo-mcp.XXXXXX.json)"
+  "$PYTHON_BIN" - "$PYTHON_BIN" "$MCP_SERVER" > "$mcp_config" <<'PYEOF'
+import json, sys
+python_bin, server = sys.argv[1], sys.argv[2]
+print(json.dumps({
+    "mcpServers": {
+        "web": {
+            "command": python_bin,
+            "args": [server],
+        }
+    }
+}))
+PYEOF
+
+  claude_args+=(--mcp-config "$mcp_config")
+fi
+
+exec "$CLAUDE_BIN" "${claude_args[@]}" "$@"
